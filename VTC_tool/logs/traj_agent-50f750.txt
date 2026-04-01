@@ -1,0 +1,6 @@
+Session Started. ID: agent-50f750
+Model: gpt-4o
+Objective: who is husband of Mia in La La Land?
+Target URL: https://www.wikipedia.org/
+================================================================================
+

@@ -1,0 +1,3 @@
+[submodule "verl-tool"]
+	path = verl-tool
+	url = https://github.com/laramie2/verl-tool.git
