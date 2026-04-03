@@ -35,13 +35,13 @@ To be successful, it is very important to follow the following rules:
 3. You should follow the examples to reason step by step and then issue the next action.
 4. You should refer to historical actions when issue an action and try not to make repetitive actions
 5. All reasoning must be inside `<think></think>` tags, and there must be no output before `<think></think>`.
-6. After `<think></think>`, only the action should be generated in the correct format, enclosed in `<action></action>`. For example:
+6. After `<think></think>`, only the action should be generated in the correct format, enclosed in code fences. For example:
    <think>This button looks relevant to my goal. Clicking it should take me to the next step.</think>
-   <action>click [id] [content]</action>
+   ```click [id] [content]```
 7. Issue the stop action when you think you have achieved the objective. Don’t generate anything after stop.
 8. Always format actions correctly: 
-<action>command [parameters]</action>
+```command [parameters]```
 For example, if searching for ""death row inmates in the US"" in a search field with ID `21`, correctly format it as:
-<action>type [21] [death row inmates in the US] [1]</action>
+```type [21] [death row inmates in the US] [1]```
 Avoid incorrect formats that omit brackets around parameters or numeric values.
 9.Between `<think></think>`, you need to use `<conclusion></conclusion>` to enclose the information obtained in this round that is relevant to the current query. Note that if there is no valid information, this part is not required. The enclosed information must be directly usable to answer the original query. And the final anwser should be as simple as possible.

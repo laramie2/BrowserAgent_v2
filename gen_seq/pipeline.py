@@ -102,7 +102,7 @@ HISTORY_info: {}
 
     def extract_command(self, text: str) -> str:
         # 支持多种标签：<action>、<cmd>、<command> 等
-        tags = ['action']
+        tags = []
         
         for tag in tags:
             pattern = rf'<{tag}>\s*(.*?)\s*</{tag}>'
