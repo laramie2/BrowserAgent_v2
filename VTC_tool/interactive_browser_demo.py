@@ -19,6 +19,7 @@ import logging
 import requests
 import fire
 
+from pathlib import Path
 from .VTC_tool import VTCTool
 
 
@@ -36,9 +37,10 @@ def interactive_browser(
 
     extra_field = {
         "question": "who plays the wildling woman in game of thrones",
-        # "url": "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
+        "url": "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
         # "url": "http://localhost:22015/"
-        "url": "https://www.wikipedia.org/"
+        # "url": "https://www.wikipedia.org/"
+        # "url": "https://www.baidu.com"
     }
 
     current_action = "" # 初始为空，获取首页
@@ -65,7 +67,8 @@ def interactive_browser(
             print(ob_text)
             print("="*60 + "\n")
 
-            save_dir = "/data/yutao/lzt/BrowserAgent_v2/VTC_tool/saved_img_demo"
+            project_root = Path(__file__).resolve().parents[1]
+            save_dir = project_root / "VTC_tool" / "saved_img_demo"
             os.makedirs(save_dir, exist_ok=True) # 如果目录不存在则创建，存在则忽略
 
             # ========================================================================

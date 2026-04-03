@@ -4,6 +4,7 @@ Interactive smoke-test for the Text-Browser tool server with VLM Agent.
 """
 
 import os
+from pathlib import Path
 import re
 import json
 import uuid
@@ -188,7 +189,8 @@ def interactive_browser(
             # 分支逻辑：图像观测 vs 纯文本观测
             # ==========================================
             if use_image_obs:
-                save_dir = "/data/yutao/lzt/BrowserAgent_v2/VTC_tool/saved_img"
+                project_root = Path(__file__).resolve().parents[1]
+                save_dir = project_root / "VTC_tool" / "saved_img"
                 os.makedirs(save_dir, exist_ok=True) 
 
                 highlights = [
