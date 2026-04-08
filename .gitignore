@@ -7,3 +7,9 @@ __pycache__/
 data/
 *.jsonl
 models/
+benchmark/
+logs/
+checkpoints/
+checkpoints*/
+dataset/
+models/
