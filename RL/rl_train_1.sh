@@ -16,7 +16,7 @@ export WANDB_API_KEY=wandb_v1_V87V1kdSf4ksYcXVKZXmneUEfX0_QYSUnBSgaZEFtVBHxjo8jn
 
 export MASTER_PORT=29500
 
-export export WANDB_MODE="offline"
+# export export WANDB_MODE="offline"
 
 
 LOG_DIR="$(pwd)/logs"
@@ -24,20 +24,22 @@ mkdir -p $LOG_DIR
 
 benchmark=nq
 dataset_name=train_1000
+val_dataset_name=test_10
 train_data=$(pwd)/dataset/${benchmark}/${dataset_name}.parquet
-val_data=$(pwd)/dataset/${benchmark}/${dataset_name}.parquet
+val_data=$(pwd)/dataset/${benchmark}/${val_dataset_name}.parquet
 checkpoint_path=$(pwd)/checkpoints
-# model_name=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/models/Qwen2.5-VL-7B-Instruct-step-opsrc-5000-merged
-model_name=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/checkpoints_1000_40/global_step_40/actor/huggingface
+model_name=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/models/Qwen2.5-VL-7B-Instruct-task-opsrc-5000stp-merged
+# model_name=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/checkpoints_1000_40/global_step_40/actor/huggingface
+resume_path=$(pwd)/checkpoints/global_step_100
 rl_alg=mt_grpo # gae(ppo) or grpo, if grpo, then better set n>1 otherwise the group norm can not be effective
 n_gpus_per_node=8
 n_nodes=1
-n=2
-train_batch_size=16
+n=4
+train_batch_size=8
 val_batch_size=2
-ppo_mini_batch_size=16
-max_prompt_length=4096
-max_response_length=10240
+ppo_mini_batch_size=8
+max_prompt_length=2048
+max_response_length=12288
 max_action_length=2048
 max_obs_length=2048
 temperature=0.5
@@ -66,7 +68,7 @@ additional_eos_token_ids=[151645] # <|im_end|> token id
 mask_observations=True # mask observations for kl loss and gradient descent
 enable_mtrl=True # enable multi-turn training
 model_pretty_name=$(echo $model_name | tr '/' '_' | tr '[:upper:]' '[:lower:]')
-run_name_postfix="run_8gpus_resume_step40"
+run_name_postfix="run_8gpus_task5000_sync"
 if [ "$enable_agent" = "True" ]; then
     run_name="${reward_manager}-${strategy}-agent-${model_pretty_name}-${benchmark}-${rl_alg}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}${run_name_postfix}"
 else
@@ -76,6 +78,7 @@ export VERL_RUN_ID=$run_name
 export NCCL_DEBUG=INFO
 export VLLM_USE_V1=1
 rollout_mode='async'
+# rollout_mode='sync'
 
 # temp file for action tokens as verl cannot pass special strs as params
 action_stop_tokens_file="$(pwd)$(mktemp)"
@@ -162,6 +165,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=$use_dynamic_bsz \
     actor_rollout_ref.rollout.max_num_seqs=512 \
     actor_rollout_ref.rollout.mode=$rollout_mode \
+    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=$use_dynamic_bsz \
     actor_rollout_ref.ref.fsdp_config.param_offload=$do_offload \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$log_prob_micro_batch_size_per_gpu \
@@ -182,9 +186,11 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     trainer.nnodes=$n_nodes \
     +trainer.remove_previous_ckpt_in_save=True \
     trainer.default_local_dir=$checkpoint_path \
-    trainer.save_freq=20 \
-    trainer.test_freq=125 \
-    trainer.total_epochs=2 \
+    trainer.save_freq=25 \
+    trainer.test_freq=1000 \
+    trainer.total_epochs=1 \
+    +trainer.save_last=True \
+    +trainer.resume_from_path=$resume_path \
     > "$LOG_DIR/train.log" 2>&1 
 
 

@@ -1,12 +1,10 @@
 # import nest_asyncio
 # nest_asyncio.apply()
 # import asyncio
+import os
 import re
-import random
-from copy import deepcopy
-from typing import Optional, Tuple, Dict, Any
-import numpy as np
-import pandas as pd
+from functools import lru_cache
+from typing import Dict, Tuple
 
 # 假设你的 BaseLanguageBasedEnv 就在同目录下的 base.py
 from .env_base import BaseLanguageBasedEnv
@@ -19,7 +17,32 @@ from .browser_actions import (
     create_none_action,
     create_playwright_action,
 )
-from .browser_env import ScriptBrowserEnv, Trajectory
+from .browser_env import ScriptBrowserEnv
+
+
+DEFAULT_BROWSER_URL = "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
+DEFAULT_PROMPT_MODEL = os.getenv("MINI_WEB_ARENA_PROMPT_MODEL", "Qwen/Qwen2.5-14B-Instruct")
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@lru_cache(maxsize=1)
+def _get_template_dict():
+    from .create_dataset import TEMPLATES
+
+    return TEMPLATES["qwen-instruct"]
+
+
+@lru_cache(maxsize=1)
+def _get_prompt_runtime(model_name: str):
+    from .agent import construct_promptConstructor
+
+    return construct_promptConstructor(model_name, None)
 
 
 class WikiQAEnv(object):
@@ -41,9 +64,7 @@ class WikiQAEnv(object):
         self.gt = gt
         self.pred = None
         self.obs_modality = "text"
-
-        from .create_dataset import TEMPLATES
-        self.template_dict = TEMPLATES['qwen-instruct']
+        self.template_dict = _get_template_dict()
 
         self.env = ScriptBrowserEnv(
             headless=True,
@@ -51,18 +72,14 @@ class WikiQAEnv(object):
             observation_type="accessibility_tree",
             current_viewport_only=True,
             viewport_size={"width": 1280, "height": 720},
-            save_trace_enabled=True,
+            save_trace_enabled=_env_flag("MINI_WEB_ARENA_SAVE_TRACE", False),
             sleep_after_execution=0.0,
             simple_mode=True,
-            page_load_timeout=60.0  # 增加到60秒等待时间
+            page_load_timeout=float(os.getenv("MINI_WEB_ARENA_PAGE_LOAD_TIMEOUT", "20.0")),
         )
 
-        from .agent import construct_promptConstructor
-        self.prompt_constructor, self.tokenizer, _ = construct_promptConstructor("Qwen/Qwen2.5-14B-Instruct", None)
-        if url == None:
-            self.url = "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
-        else:
-            self.url = url
+        self.prompt_constructor, self.tokenizer, _ = _get_prompt_runtime(DEFAULT_PROMPT_MODEL)
+        self.url = url or DEFAULT_BROWSER_URL
         obs, _ = self.env.reset_without_config(start_url=self.url)
         self.history = [{"role": "system"}, {"role": "user", "question": self.question, "url": self.url,
                                              "observation": obs[self.obs_modality], "previous_action": None}]

@@ -293,8 +293,8 @@ python extract_rl.py \
   --seed 42
 
 python extract_rl.py \
-  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/validation-00000-of-00001.parquet" \
-  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/hotpot" \
-  --num_samples 1000 \
-  --output_prefix "test_1000"
+  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/test-00000-of-00001.parquet" \
+  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/nq" \
+  --num_samples 10 \
+  --output_prefix "test_10"
 """

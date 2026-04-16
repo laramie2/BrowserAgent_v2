@@ -45,7 +45,7 @@ def parse_user_content(content: str) -> Dict[str, str]:
     
     return result
 
-def generate_image_for_observation(ob_text: str, output_dir: str) -> str:
+def generate_image_for_observation(ob_text: str, output_dir: str, is_simple: bool = False) -> str:
     """使用哈希值作为文件名，避免重复渲染相同的 Observation"""
     global _local_vtc
     
@@ -57,12 +57,19 @@ def generate_image_for_observation(ob_text: str, output_dir: str) -> str:
     # 如果图片已存在，直接返回路径（大幅节省渲染时间）
     if not os.path.exists(img_path):
         os.makedirs(output_dir, exist_ok=True)
-        img, char_count = _local_vtc.render_text_to_image(
-            ob_text, 
-            use_compact_mode=True, 
-            max_width=2048, 
-            max_height=4096
-        )
+        if not is_simple:
+            img, char_count = _local_vtc.render_text_to_image(
+                ob_text, 
+                use_compact_mode=True, 
+                max_width=2048, 
+                max_height=4096
+            )
+        else:
+            img, char_count = _local_vtc.render_text_to_image_simple(
+                ob_text, 
+                width=1024
+            )
+
         img.save(img_path)
         
     return img_path
@@ -70,7 +77,7 @@ def generate_image_for_observation(ob_text: str, output_dir: str) -> str:
 # ==========================================
 # 数据处理核心逻辑
 # ==========================================
-def task_generator(input_file: str):
+def task_generator(input_file: str, local_system_msg: str = None):
     """核心优化 2：流式读取数据，避免将超大文件一次性载入内存"""
     with open(input_file, 'r', encoding='utf-8') as f:
         current_task = []
@@ -78,7 +85,7 @@ def task_generator(input_file: str):
         
         for line in f:
             item = json.loads(line)
-            system_msg = next((m for m in item['messages'] if m['role'] == 'system'), None)
+            system_msg = next((m for m in item['messages'] if m['role'] == 'system'), None) if local_system_msg is None else {"role": "system", "content": local_system_msg}
             user_msg = next((m for m in item['messages'] if m['role'] == 'user'), None)
             assistant_msg = next((m for m in item['messages'] if m['role'] == 'assistant'), None)
             
@@ -102,7 +109,7 @@ def task_generator(input_file: str):
         if current_task:
             yield current_task
 
-def process_single_task(task_steps: List[Dict], image_output_dir: str, level: str, format_type: str) -> Tuple[List[Dict], int]:
+def process_single_task(task_steps: List[Dict], image_output_dir: str, level: str, format_type: str, is_simple: bool = False) -> Tuple[List[Dict], int]:
     """核心优化 3：将单个任务的处理逻辑纯粹化，以便分配给多进程执行"""
     task_images = []
     task_messages = []
@@ -120,7 +127,7 @@ def process_single_task(task_steps: List[Dict], image_output_dir: str, level: st
         parsed = step['parsed_user']
         
         # 调用基于哈希的渲染函数
-        img_obs_path = generate_image_for_observation(parsed['observation'], image_output_dir)
+        img_obs_path = generate_image_for_observation(parsed['observation'], image_output_dir, is_simple=is_simple)
         img_filename = os.path.basename(img_obs_path)
         img_path = os.path.join("images", img_filename)  # 相对路径
         
@@ -175,10 +182,10 @@ def process_single_task(task_steps: List[Dict], image_output_dir: str, level: st
         return step_outputs, len(task_steps)
 
 def convert_dataset(input_file: str, output_file: str, image_output_dir: str, 
-                    level: str, format_type: str, max_workers: int = None):
+                    level: str, format_type: str, max_workers: int = None, local_system_msg: str = None, is_simple: bool = False):
     print("Initializing task generator...")
     # 获取任务迭代器
-    tasks = task_generator(input_file)
+    tasks = task_generator(input_file, local_system_msg)
     
     stats = {
         "total_converted_tasks": 0,
@@ -196,7 +203,8 @@ def convert_dataset(input_file: str, output_file: str, image_output_dir: str,
                 process_single_task, 
                 image_output_dir=image_output_dir, 
                 level=level, 
-                format_type=format_type
+                format_type=format_type,
+                is_simple=is_simple
             )
             
             print(f"Starting multiprocessing conversion (Workers: {executor._max_workers})...")
@@ -250,9 +258,17 @@ if __name__ == "__main__":
     parser.add_argument("--format", type=str, choices=["openai", "opensource"], default="opensource", help="Vision data format")
     # 可以手动指定使用的进程数，默认会自动根据系统 CPU 核心数分配
     parser.add_argument("--workers", type=int, default=None, help="Number of multi-processing workers")
-    
+    parser.add_argument("--system_msg_path", type=str, default=None, help="Optional fixed system message to override original system prompts")
+    parser.add_argument("--is_simple", type=bool, default=False, help="Whether to use simplified VTC rendering ")
+
     args = parser.parse_args()
+
+    local_system_msg = None
     
+    if args.system_msg_path:
+        with open(args.system_msg_path, 'r', encoding='utf-8') as f:
+            local_system_msg = f.read().strip()
+
     print(f"Starting conversion...\nMode: {args.level}-level | Format: {args.format}")
     convert_dataset(
         input_file=args.input,
@@ -260,22 +276,27 @@ if __name__ == "__main__":
         image_output_dir=args.img_dir,
         level=args.level,
         format_type=args.format,
-        max_workers=args.workers
+        max_workers=args.workers,
+        local_system_msg=local_system_msg,  # 可以在这里传入一个固定的 system prompt 来覆盖原数据中的 system 信息
+        is_simple=args.is_simple  # 是否使用简化版 VTC 渲染逻辑
     )
 
 
+
 """
-python -m gen_seq_para.VTC_seq \
+python -m gen_seq.VTC_seq_para \
     --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft.jsonl \
-    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc.jsonl \
-    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc_images \
+    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-simplified.jsonl \
+    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-simplified_images \
     --level task \
     --format opensource
+    --system_msg_path /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_seq/system_prompt_with_history_info_enhance.txt \
+    --is_simple True
 
-python -m gen_seq_para.VTC_seq \
+python -m gen_seq.VTC_seq_para \
     --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft.jsonl \
-    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_step-opsrc.jsonl \
-    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_step-opsrc_images \
+    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_step-opsrc-simplified.jsonl \
+    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_step-opsrc-simplified_images \
     --level step \
     --format opensource
 """

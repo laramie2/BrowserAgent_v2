@@ -317,7 +317,7 @@ if __name__ == "__main__":
 
 """
 终端使用示例
-1. 任务级模式，随机抽取 500 个完整的任务（行），并附带提取对应的多张图片
+1. 任务级模式，随机抽取 5000 个完整的任务（行），并附带提取对应的多张图片
 python extract_sft.py \
     --input_file data.jsonl --output_file small.jsonl \
     --mode task --num-tasks 500 \
@@ -328,7 +328,7 @@ python extract_sft.py \
     --output_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-5000stp/data.jsonl \
     --src-img-dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc/ \
     --dst-img-dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-5000stp/ \
-    --mode task --num-task 500 \
+    --mode task --num-task 5000 \
     -r -s 42 -v
 
 2.任务级模式，不断随机抽取完整任务，直到累计的“步骤数量”达到 1000 步
@@ -363,7 +363,7 @@ python extract_sft.py \
 4.查看详细数据    
 python extract_sft.py --output_file out.jsonl --mode task -v
 
-python extract_sft.py --output_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/step-opsrc-5000/data.jsonl --mode step -v
+python extract_sft.py --output_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc/data.jsonl --mode step -v
 
 5.提取问题
 python extract_sft.py \
@@ -373,6 +373,6 @@ python extract_sft.py \
 
 python extract_sft.py \
     --extract_obj \
-    --output_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/step-opsrc-5000/data.jsonl \
-    --obj_output_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/step-opsrc-5000/obj.json
+    --output_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc/data.jsonl \
+    --obj_output_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc/obj.json
 """

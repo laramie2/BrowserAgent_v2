@@ -1,9 +1,8 @@
 #!/bin/bash
 # run_vllm_instance1.sh
 
-MODEL_NAME="Qwen2.5-VL-7B-Instruct-task-opsrc-2500stp"
-INSTANCE_ID="instance_task-2500stp"
-PORT=8009
+INSTANCE_ID="instance_task-opsrc-sft-1e-4lr-freeze_false-1epoch"
+PORT=8008
 LOG_FILE="./logs/vllm_${INSTANCE_ID}.log"
 
 # 清理同名实例（只清理自己）
@@ -15,15 +14,16 @@ mkdir -p ./logs
 
 export LIBRARY_PATH=$CONDA_PREFIX/lib:$LIBRARY_PATH
 
+MODEL_PATH=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/output/Qwen2.5-VL-7B-Instruct-task-opsrc-sft-1e-4lr-freeze_false-1epoch-merged
 
-CUDA_VISIBLE_DEVICES=3,4 \
+CUDA_VISIBLE_DEVICES=1,2 \
 python -m vllm.entrypoints.openai.api_server \
-    --model /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/output/${MODEL_NAME}-merged \
-    --served-model-name custom-llm-2 \
+    --model $MODEL_PATH \
+    --served-model-name custom-llm-1 \
     --host 0.0.0.0 \
     --port $PORT \
     --trust-remote-code \
-    --max-model-len 8192 \
+    --max-model-len 16384 \
     --tensor-parallel-size 2 \
     > $LOG_FILE 2>&1
 

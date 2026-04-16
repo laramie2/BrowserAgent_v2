@@ -46,7 +46,7 @@ def count_success_tasks(jsonl_file_path):
 # 使用示例
 if __name__ == "__main__":
     # 方法1：直接指定文件路径
-    file_path = '/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_seq/results/Qwen2.5-VL-7B-text/hotpot_test_results.jsonl'  # 替换为你的文件路径
+    file_path = '/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_seq/results/Qwen2.5-VL-7B-Instruct_task-opsrc-sft-5e-5lr-freeze_false-2epoch/hotpot_test_results.jsonl'  # 替换为你的文件路径
     stats = count_success_tasks(file_path)
     
     if stats:

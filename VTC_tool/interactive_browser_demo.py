@@ -38,7 +38,7 @@ def interactive_browser(
     extra_field = {
         "question": "who plays the wildling woman in game of thrones",
         "url": "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
-        # "url": "http://localhost:22015/"
+        # "url": "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
         # "url": "https://www.wikipedia.org/"
         # "url": "https://www.baidu.com"
     }
@@ -74,16 +74,40 @@ def interactive_browser(
             # ========================================================================
             # 将工具返回观测文本渲染为图像并保存
             # ========================================================================
-            # highlight_keywords = ["Observation", "Action", "observation", "action", "url:"] # 需要高亮的关键词列表
+            highlight_keywords = ["Observation", "Action", "observation", "action", "url:"] # 需要高亮的关键词列表
             highlights = [
                 {"context": "action:", "color": (255, 150, 150)},      # 动作标红
                 {"context": "observation:", "color": (150, 255, 150)}, # 观测标绿
                 {"context": "url:", "color": (255, 50, 50)},         # 错误标深红
                 {"context": "\\n", "color": (100, 100, 255)}           # 紧凑模式下的转义换行符标蓝
             ]
-            vtc = VTCTool(font_size=18, bg_color=(20, 20, 20), text_color=(200, 200, 200), title_color=(80, 180, 80), highlight_configs=highlights)
-            img, char_count = vtc.render_text_to_image(ob_text, use_compact_mode=True, max_width=2048, max_height=4096)
-            # img = vtc.compress_image_arrays([img], compression_factor=3.0)[0] # 进一步压缩以节省空间         
+
+            # vtc = VTCTool(
+            #     font_size=18, 
+            #     bg_color=(20, 20, 20), 
+            #     text_color=(200, 200, 200), 
+            #     title_color=(80, 180, 80), 
+            #     highlight_configs=highlights)
+            # img, char_count = vtc.render_text_to_image(
+            #     ob_text, use_compact_mode=True, 
+            #     max_width=2048, 
+            #     max_height=4096
+            # )
+            
+            vtc = VTCTool(
+                font_size=18, 
+                bg_color=(20, 20, 20),           # 深灰底色
+                text_color=(200, 200, 200),      # 浅灰文字
+                title_color=(80, 180, 80),       # 绿色标题
+                id_color=(255, 215, 0)           # 【新增】金黄色，专门用于高亮 [343] 这种可交互 ID
+            )
+            img, char_count = vtc.render_text_to_image_simple(
+                ob_text, 
+                width=1024,                      # 设定基准宽度，1024 对 ViT 来说通常足够清晰
+                aspect_ratio="4:3"               # 生成 1024 x 768 的稳定比例图像
+            )
+            
+            img = vtc.compress_image_arrays([img], compression_factor=3.0)[0] # 进一步压缩以节省空间         
 
             # 使用 os.path.join 拼接路径更安全
             save_path = os.path.join(save_dir, f"observation_step_{step}.png")

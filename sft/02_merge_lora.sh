@@ -6,22 +6,23 @@
 # ==========================================
 SFT_ROOT="/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft"
 MODEL_NAME="Qwen2.5-VL-7B-Instruct"
-DATASET_NAME="step-opsrc-2500"
+DATASET_NAME="task-opsrc-sft-1e-4lr-freeze_false"
+EPOCH=2
 # 原始模型路径
 MODEL_PATH="/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/models/${MODEL_NAME}"
 
 # 【重要：请替换为训练完成后生成的具体时间戳目录名和 checkpoint 步数】
-CHECKPOINT_SUBDIR="v0-20260404-224004/checkpoint-7500" 
+CHECKPOINT_SUBDIR="v0-20260414-034308/checkpoint-344"
 # ==========================================
 # 2. 导出路径配置区
 # ==========================================
 # 训练产生的 LoRA 权重路径
-CKPT_DIR="${SFT_ROOT}/output/${MODEL_NAME}-${DATASET_NAME}-sft/${CHECKPOINT_SUBDIR}"
+CKPT_DIR="${SFT_ROOT}/output/${MODEL_NAME}-${DATASET_NAME}/${CHECKPOINT_SUBDIR}"
 
 # 合并后的完整模型输出路径
-MERGED_OUTPUT_DIR="${SFT_ROOT}/output/${MODEL_NAME}-${DATASET_NAME}-merged"
+MERGED_OUTPUT_DIR="${SFT_ROOT}/output/${MODEL_NAME}-${DATASET_NAME}-${EPOCH}epoch-merged"
 
-LOG_FILE="${SFT_ROOT}/logs/merge_${MODEL_NAME}_${DATASET_NAME}.log"
+LOG_FILE="${SFT_ROOT}/logs/merge_${MODEL_NAME}_${DATASET_NAME}-${EPOCH}epoch.log"
 
 # ==========================================
 # 3. 执行合并逻辑
@@ -33,6 +34,7 @@ echo "Checkpoint: $CKPT_DIR"
 echo "Output: $MERGED_OUTPUT_DIR"
 
 # 使用 nohup 后台运行，将 export 和 完美的“换头术” 结合
+CUDA_VISIBLE_DEVICES=3,4,5,6 \
 nohup bash -c "
     export LIBRARY_PATH=/usr/local/cuda/lib64/stubs:/usr/lib/x86_64-linux-gnu:\$LIBRARY_PATH && \
     swift export \

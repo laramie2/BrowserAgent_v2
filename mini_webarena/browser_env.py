@@ -30,6 +30,7 @@ from .utils import (
 )
 
 import base64
+import os
 from .scripts import *
 
 Trajectory = list[Union[StateInfo, Action]]
@@ -109,6 +110,30 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         self.sleep_after_execution = sleep_after_execution
         self.simple_mode = simple_mode
         self.page_load_timeout = page_load_timeout
+        self.domcontentloaded_timeout_ms = int(
+            os.getenv("MINI_WEB_ARENA_DOM_TIMEOUT_MS", "3000")
+        )
+        self.networkidle_timeout_ms = int(
+            os.getenv("MINI_WEB_ARENA_NETWORKIDLE_TIMEOUT_MS", "100")
+        )
+        self.busy_check_interval = float(
+            os.getenv("MINI_WEB_ARENA_BUSY_CHECK_INTERVAL", "0.2")
+        )
+        self.busy_wait_timeout = float(
+            os.getenv("MINI_WEB_ARENA_BUSY_WAIT_TIMEOUT", "6.0")
+        )
+        self.search_page_busy_wait_timeout = float(
+            os.getenv("MINI_WEB_ARENA_SEARCH_BUSY_WAIT_TIMEOUT", "10.0")
+        )
+        self.ready_stable_delay = float(
+            os.getenv("MINI_WEB_ARENA_READY_STABLE_DELAY", "0.1")
+        )
+        self.forced_continue_delay = float(
+            os.getenv("MINI_WEB_ARENA_FORCED_CONTINUE_DELAY", "0.2")
+        )
+        self.page_ready_exception_delay = float(
+            os.getenv("MINI_WEB_ARENA_READY_EXCEPTION_DELAY", "0.5")
+        )
 
         match observation_type:
             case "html" | "accessibility_tree":
@@ -218,38 +243,51 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
     def _wait_for_page_ready(self) -> None:
         """等待页面加载完成，确保页面不再处于busy状态"""
         max_wait_time = self.page_load_timeout  # 使用配置的超时时间
-        check_interval = 0.2  # 每200ms检查一次，减少频繁检查
+        check_interval = self.busy_check_interval
         start_time = time.time()
         
         # 检查是否是搜索页面，搜索页面可能需要更长等待时间
         current_url = self.page.url
         is_search_page = 'search' in current_url.lower() or 'query' in current_url.lower()
+        busy_wait_budget = min(max_wait_time, self.busy_wait_timeout)
         if is_search_page:
-            max_wait_time = max(max_wait_time, 45.0)  # 搜索页面至少等待45秒
-            print(f"[DEBUG] 检测到搜索页面，延长等待时间到 {max_wait_time} 秒")
+            busy_wait_budget = min(
+                max_wait_time,
+                max(busy_wait_budget, self.search_page_busy_wait_timeout),
+            )
+            print(f"[DEBUG] 检测到搜索页面，busy等待预算调整为 {busy_wait_budget} 秒")
         
         print(f"[DEBUG] 开始等待页面加载完成... (URL: {current_url})")
         
         try:
             # 第一步：等待基本加载状态
             try:
-                self.page.wait_for_load_state('domcontentloaded', timeout=5000)
+                self.page.wait_for_load_state(
+                    'domcontentloaded',
+                    timeout=self.domcontentloaded_timeout_ms,
+                )
                 print(f"[DEBUG] DOM内容加载完成")
             except Exception as e:
                 print(f"[DEBUG] DOM加载等待超时: {e}")
             
             # 第二步：等待网络空闲
             try:
-                self.page.wait_for_load_state('networkidle', timeout=3000)
+                self.page.wait_for_load_state(
+                    'networkidle',
+                    timeout=self.networkidle_timeout_ms,
+                )
                 print(f"[DEBUG] 网络空闲状态达到")
             except Exception as e:
                 print(f"[DEBUG] 网络空闲等待超时: {e}")
             
             # 第三步：检查busy状态并等待
             busy_check_count = 0
-            max_busy_checks = int(max_wait_time / check_interval)
+            max_busy_checks = max(1, int(busy_wait_budget / check_interval))
             
-            while time.time() - start_time < max_wait_time and busy_check_count < max_busy_checks:
+            while (
+                time.time() - start_time < max_wait_time
+                and busy_check_count < max_busy_checks
+            ):
                 try:
                     # 获取accessibility tree来检查是否还在busy状态
                     if self.text_observation_type == "accessibility_tree":
@@ -281,20 +319,24 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             
             # 如果仍然busy，给出警告但继续执行
             if busy_check_count >= max_busy_checks:
-                print(f"[WARN] 页面在{max_wait_time}秒后仍处于busy状态，强制继续")
-                # 对于持续busy的页面，额外等待更长时间
-                time.sleep(2.0)
+                print(f"[WARN] 页面在{busy_wait_budget}秒后仍处于busy状态，强制继续")
+                time.sleep(self.forced_continue_delay)
             else:
                 # 额外等待一小段时间确保稳定
-                time.sleep(0.3)
+                time.sleep(self.ready_stable_delay)
                     
         except Exception as e:
             # 如果等待过程中出现异常，记录但不中断流程
             print(f"[WARN] Page ready check failed: {e}")
             # 至少等待一个基本的时间
-            time.sleep(1.0)
+            time.sleep(self.page_ready_exception_delay)
 
     def _get_obs(self) -> dict[str, Observation]:
+        try:
+            # 强行停止任何正在进行的网络请求或动画，暴力解除 busy
+            self.page.evaluate("window.stop()")
+        except:
+            pass
         obs = self.observation_handler.get_observation(
             self.page, self.get_page_client(self.page)
         )
