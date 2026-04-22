@@ -8,12 +8,15 @@ from openai import OpenAI
 import argparse
 import re
 import uuid
+import base64
+from io import BytesIO
+from PIL import Image
+import traceback
 
 
-api_key = "sk-5b242d486cf743029a466acd3924046c"
-base_url = "https://api.deepseek.com/v1"
-
-client = OpenAI(api_key = api_key, base_url= base_url)
+# 替换为新的 Venus API 配置
+VENUS_URL = "http://v2.open.venus.oa.com/llmproxy/chat/completions"
+VENUS_TOKEN = "YOUR_VENUS_TOKEN_HERE" # 填入你的实际 Token
 
 with open("/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_enhance.txt", "r", encoding="utf-8") as f:
     system_prompt = f.read()
@@ -46,25 +49,40 @@ HISTORY_info: {}
 
 # def get_response(prompt, model="gemini-2.5-pro", temperature=0.3, max_retries=5):
 def get_response(prompt, model="deepseek-reasoner", temperature=0.3, max_retries=5):
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {VENUS_TOKEN}'
+    }
+    
+    payload = {
+        'model': model,
+        'messages': [{"role": "user", "content": prompt}],
+        'temperature': temperature,
+        'max_tokens': 1024
+    }
+
     for attempt in range(max_retries):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=1024,
-                timeout=60
-            )
+            # 增加 timeout 防止卡死
+            response = requests.post(VENUS_URL, headers=headers, json=payload, timeout=60)
             
-            message = response.choices[0].message
+            # 替代原先的 openai.InternalServerError / RateLimitError 处理
+            if response.status_code != 200:
+                wait_time = (attempt + 1) * 5
+                print(f"⚠️ 服务器拥塞或请求失败 (状态码: {response.status_code})，{wait_time}秒后重试... 报错: {response.text}")
+                time.sleep(wait_time)
+                continue
+                
+            resp_json = response.json()
+            message = resp_json['choices'][0]['message']
             
-            # 1. 安全提取 content (防止 None 导致报错)
-            normal_content = message.content if message.content else ""
+            # 1. 安全提取 content (从字典取值)
+            normal_content = message.get('content', "")
+            if not normal_content:
+                normal_content = ""
             
             # 2. 尝试提取 deepseek-reasoner 专属的 reasoning_content
-            reasoning_content = getattr(message, 'reasoning_content', "")
-            if not reasoning_content:
-                reasoning_content = ""
+            reasoning_content = message.get('reasoning_content', "")
                 
             # 3. 按照你 SFT 数据集的格式要求重新拼装
             if reasoning_content:
@@ -77,16 +95,18 @@ def get_response(prompt, model="deepseek-reasoner", temperature=0.3, max_retries
                 print("⚠️ 警告：模型本次请求返回了完全空的内容，以占位符替换。")
                 model_answer = "<action>stop [N/A]</action>"
                 
-            usage = response.usage
-            p_tokens = usage.prompt_tokens if usage else 0
-            c_tokens = usage.completion_tokens if usage else 0
-            t_tokens = usage.total_tokens if usage else 0
+            # 提取 Token 使用量
+            usage = resp_json.get('usage', {})
+            p_tokens = usage.get('prompt_tokens', 0)
+            c_tokens = usage.get('completion_tokens', 0)
+            t_tokens = usage.get('total_tokens', 0)
             
             return model_answer, p_tokens, c_tokens, t_tokens
 
-        except (openai.InternalServerError, openai.RateLimitError) as e:
+        except requests.exceptions.RequestException as e:
+            # 捕获网络层面的异常 (如超时、连接重置)
             wait_time = (attempt + 1) * 5
-            print(f"⚠️ 服务器拥塞 (503/RateLimit)，{wait_time}秒后重试... 错误: {e}")
+            print(f"⚠️ 网络请求异常，{wait_time}秒后重试... 错误: {e}")
             time.sleep(wait_time)
         except Exception as e:
             print(f"❌ 遇到不可恢复错误: {e}")
@@ -235,6 +255,36 @@ def Get_multi_turn_response(question, answer, output_file):
         time.sleep(1.5)
 
         if "stop" in last_command:
+            # ==========================================
+            #           新增：答案提取与正确性判断
+            # ==========================================
+            match = re.search(r'stop\s*\[(.*?)\]', last_command, re.IGNORECASE)
+            if match:
+                final_answer = match.group(1).strip()
+            else:
+                final_answer = last_command.replace("stop", "").strip(" []")
+            
+            # 判断逻辑：ground_truth 是否包含在模型的最终回答中（忽略大小写）
+            success = (str(answer).lower() in final_answer.lower()) if answer else False
+            
+            # 构建独立的结果指标记录
+            eval_record = {
+                "id": tar_id,
+                "question": question,
+                "ground_truth": answer,
+                "final_answer": final_answer,
+                "success": success
+            }
+            
+            # 将同名后缀替换为 _results.jsonl 并写入
+            result_file = output_file.replace(".jsonl", "_results.jsonl")
+            if not result_file.endswith("_results.jsonl"):
+                result_file += "_results.jsonl"  # 兜底：如果原文件没有.jsonl后缀
+                
+            with open(result_file, "a", encoding="utf-8") as fw:
+                fw.write(json.dumps(eval_record, ensure_ascii=False) + "\n")
+            # ==========================================
+
             call_tool_server([tar_id], [response], [True])
             return task_prompt_tokens, task_completion_tokens, task_total_tokens
             
