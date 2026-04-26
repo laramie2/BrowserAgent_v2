@@ -6,13 +6,13 @@
 # ==========================================
 SFT_ROOT="/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft"
 MODEL_NAME="Qwen2.5-VL-7B-Instruct"
-DATASET_NAME="task-opsrc-sft-1e-4lr-freeze_false"
+DATASET_NAME="task-opsrc-without_content-newadd2720-sft-5e-5lr-freeze_false"
 EPOCH=2
 # 原始模型路径
 MODEL_PATH="/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/models/${MODEL_NAME}"
 
 # 【重要：请替换为训练完成后生成的具体时间戳目录名和 checkpoint 步数】
-CHECKPOINT_SUBDIR="v0-20260414-034308/checkpoint-344"
+CHECKPOINT_SUBDIR="v3-20260424-200127/checkpoint-510"
 # ==========================================
 # 2. 导出路径配置区
 # ==========================================
@@ -34,7 +34,7 @@ echo "Checkpoint: $CKPT_DIR"
 echo "Output: $MERGED_OUTPUT_DIR"
 
 # 使用 nohup 后台运行，将 export 和 完美的“换头术” 结合
-CUDA_VISIBLE_DEVICES=3,4,5,6 \
+CUDA_VISIBLE_DEVICES=0,1 \
 nohup bash -c "
     export LIBRARY_PATH=/usr/local/cuda/lib64/stubs:/usr/lib/x86_64-linux-gnu:\$LIBRARY_PATH && \
     swift export \

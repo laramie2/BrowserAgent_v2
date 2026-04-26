@@ -1,0 +1,123 @@
+version: "3.9"
+
+services:
+  wiki-lb:
+    image: nginx:stable
+    container_name: wiki-lb
+    network_mode: host
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: always
+    depends_on:
+      - wikipedia-1
+      - wikipedia-2
+      - wikipedia-3
+      - wikipedia-4
+      - wikipedia-5
+      - wikipedia-6
+      - wikipedia-7
+      - wikipedia-8
+
+  wikipedia-1:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia-1
+    command: ["--port=80", "/data/wikipedia_en_all_maxi_2022-05.zim"]
+    ports:
+      - "22115:80"
+    shm_size: "8g"
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/1:/data:ro
+    restart: always
+
+  wikipedia-2:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia-2
+    command: ["--port=80", "/data/wikipedia_en_all_maxi_2022-05.zim"]
+    ports:
+      - "22116:80"
+    shm_size: "8g"
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/2:/data:ro
+    restart: always
+
+  wikipedia-3:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia-3
+    command: ["--port=80", "/data/wikipedia_en_all_maxi_2022-05.zim"]
+    ports:
+      - "22117:80"
+    shm_size: "8g"
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/3:/data:ro
+    restart: always
+
+  wikipedia-4:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia-4
+    command: ["--port=80", "/data/wikipedia_en_all_maxi_2022-05.zim"]
+    ports:
+      - "22118:80"
+    shm_size: "8g"
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/4:/data:ro
+    restart: always
+
+  wikipedia-5:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia-5
+    command: ["--port=80", "/data/wikipedia_en_all_maxi_2022-05.zim"]
+    ports:
+      - "22119:80"
+    shm_size: "8g"
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/1:/data:ro
+    restart: always
+
+  wikipedia-6:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia-6
+    command: ["--port=80", "/data/wikipedia_en_all_maxi_2022-05.zim"]
+    ports:
+      - "22120:80"
+    shm_size: "8g"
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/2:/data:ro
+    restart: always
+
+  wikipedia-7:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia-7
+    command: ["--port=80", "/data/wikipedia_en_all_maxi_2022-05.zim"]
+    ports:
+      - "22121:80"
+    shm_size: "8g"
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/3:/data:ro
+    restart: always
+
+  wikipedia-8:
+    image: ghcr.io/kiwix/kiwix-serve:3.3.0
+    container_name: wikipedia-8
+    command: ["--port=80", "/data/wikipedia_en_all_maxi_2022-05.zim"]
+    ports:
+      - "22122:80"
+    shm_size: "8g"
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/4:/data:ro
+    restart: always

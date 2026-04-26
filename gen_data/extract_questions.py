@@ -66,6 +66,6 @@ if __name__ == "__main__":
 
 """
 python extract_questions.py \
-  --parquet_path /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/sft_extract/sft-hotpot2500-nq2500-seed.parquet \
-  --output_json obj.json
+  --parquet_path /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v3/sft-hotpot10000-nq10000-seed.parquet \
+  --output_json /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v3/obj.json
 """

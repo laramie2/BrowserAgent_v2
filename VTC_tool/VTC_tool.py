@@ -18,7 +18,6 @@ class VTCTool:
         bg_color: Tuple[int, int, int] = (30, 30, 30),      # 深灰底色
         text_color: Tuple[int, int, int] = (220, 220, 220), # 浅灰文字
         title_color: Tuple[int, int, int] = (100, 200, 100),# 绿色标题
-        highlight_configs: Optional[List[Dict[str, Any]]] = None, # V1 字典高亮配置
         id_color: Tuple[int, int, int] = (255, 215, 0)      # V2 ID加粗高亮颜色 (金黄)
     ):
         self.font_size = font_size
@@ -36,21 +35,7 @@ class VTCTool:
         self.line_height = (bbox[3] - bbox[1]) + 8  # 字体高度 + 8px 行距
 
         # ==========================================
-        # 初始化 V1 模式的字典高亮 (正则)
-        # ==========================================
-        self.highlight_configs = highlight_configs or []
-        self.highlight_dict = {
-            cfg["context"]: cfg.get("color", (255, 255, 255)) 
-            for cfg in self.highlight_configs
-        }
-        if self.highlight_dict:
-            escaped_keys = [re.escape(k) for k in self.highlight_dict.keys()]
-            self.highlight_pattern = re.compile(f'({"|".join(escaped_keys)})')
-        else:
-            self.highlight_pattern = None
-
-        # ==========================================
-        # 初始化 V2 模式的 ID 高亮 (正则)
+        #  ID 高亮 (正则)
         # ==========================================
         self.id_pattern = re.compile(r'(\[\d+\])')
 
@@ -95,8 +80,7 @@ class VTCTool:
     # ==========================================
     def _compact_text(self, text: str) -> str:
         """【V1 专用】将换行替换为可见转义字符"""
-        text = text.replace('\n', '\\n ')
-        text = text.replace('\t', '\\t ')
+        text = re.sub(r'\\n|\\t|\n|\t', ' ', text)
         text = re.sub(r' +', ' ', text)
         return text.strip()
 
@@ -141,21 +125,8 @@ class VTCTool:
         return lines
 
     # ==========================================
-    # 文本高亮绘制模块 (区分 V1 和 V2)
+    # 文本高亮绘制模块
     # ==========================================
-    def _draw_line_with_dict_highlights(self, draw: ImageDraw.Draw, x: int, y: int, line: str):
-        """【V1 专用】基于字典配置进行正则高亮"""
-        if not self.highlight_pattern:
-            draw.text((x, y), line, fill=self.text_color, font=self.font)
-            return
-        parts = self.highlight_pattern.split(line)
-        current_x = x
-        for part in parts:
-            if not part: continue
-            color = self.highlight_dict.get(part, self.text_color)
-            draw.text((current_x, y), part, fill=color, font=self.font)
-            current_x += self.font.getlength(part)
-
     def _draw_line_with_id_highlights(self, draw: ImageDraw.Draw, x: int, y: int, line: str):
         """【V2 专用】基于 [ID] 格式进行加粗+金黄高亮"""
         parts = self.id_pattern.split(line)
@@ -225,11 +196,7 @@ class VTCTool:
                 draw.text((padding_x, y_cursor), warning_text, fill=(255, 100, 100), font=self.font)
                 break
             
-            if getattr(self, 'highlight_pattern', None): 
-                # 使用 V1 的字典渲染
-                self._draw_line_with_dict_highlights(draw, padding_x, y_cursor, line)
-            else:
-                draw.text((padding_x, y_cursor), line, fill=self.text_color, font=self.font)
+            self._draw_line_with_id_highlights(draw, padding_x, y_cursor, line)
                 
             char_count += len(line)
             y_cursor += self.line_height

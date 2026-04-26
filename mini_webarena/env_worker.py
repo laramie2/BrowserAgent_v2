@@ -49,7 +49,7 @@ class WikiQAEnv(object):
     def __init__(
             self,
             question, gt,
-            max_steps: int = 10,
+            max_steps: int = 15,
             threshold: float = 0.7,
             prompt_format="single",  # full, last, single, tunc
             url = None

@@ -20,8 +20,8 @@ def generate_image_for_observation(vtc_tool: Any, ob_text: str, output_dir: str,
     img, char_count = vtc_tool.render_text_to_image(
         ob_text, 
         use_compact_mode=True, 
-        max_width=1024, 
-        max_height=1024
+        max_width=2048, 
+        max_height=2048
     )
     render_time = time.perf_counter() - start_render
 
@@ -58,8 +58,8 @@ class TextBrowserEnv:
     def __init__(self, env_url: str = "http://localhost:5000/get_observation"):
         self.env_url = env_url
         self.default_extra_fields = [{
-            "url": "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
-            # "url": "http://localhost:22015/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
+            # "url": "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
+            "url": "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
         }]
         
         # ==================== 新增：启用 Session 保持长连接 ====================
@@ -205,6 +205,11 @@ class TrajectoryPipeline:
         with open(system_prompt_path, "r", encoding="utf-8") as f:
             self.system_prompt = f.read()
             
+#         self.user_prompt_template = """
+# Objective: {}
+# Observation: {}
+# HISTORY_info: {}
+# """
         self.user_prompt_template = """
 Objective: {}
 Observation: {}
@@ -213,7 +218,7 @@ HISTORY_info: {}
 """
 
     def extract_command(self, text: str) -> str:
-        tags = []
+        tags = ["action"]
         for tag in tags:
             pattern = rf'<{tag}>\s*(.*?)\s*</{tag}>'
             blocks = re.findall(pattern, text, re.DOTALL)
@@ -280,6 +285,7 @@ HISTORY_info: {}
                 )
                 text_obs = "<Image provided attached. Please refer to the visual observation.>"
 
+            # real_prompt = self.user_prompt_template.format(question, text_obs, history_info)
             real_prompt = self.user_prompt_template.format(question, text_obs, history_actions, history_info)
             
             # 2. 模型推理

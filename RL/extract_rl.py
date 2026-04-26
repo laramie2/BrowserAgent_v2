@@ -114,66 +114,95 @@ def extract_question_from_row(extra_info):
         pass
     return ""
 
-def adapt_to_legal_format(row):
+def adapt_to_rlhf_format(row):
     """
-    将当前数据行转换为合法的训练格式。
-    补全 ground_truth, gt, url, id，并修复 prompt 的占位符格式。
-    """
-    extra_info = safe_eval(row['extra_info'])
-    reward_model = safe_eval(row['reward_model'])
-    prompt = safe_eval(row['prompt'])
+    统一 prompt 为:
+    [
+        {"role": "system", "content": NEW_SYSTEM_PROMPT},
+        {"role": "user", "content": INITIAL_USER_PROMPT}
+    ]
 
-    # --- 1. 修复 extra_info ---
-    question = ""
-    golden_answers = []
-    if isinstance(extra_info, dict):
-        question = extra_info.get('question', '')
-        raw_golden_answers = extra_info.get('golden_answers', [])
-        
-        # 【关键修复】如果读取出来是 numpy 数组，将其转换为普通 python 列表
-        if isinstance(raw_golden_answers, np.ndarray):
-            golden_answers = raw_golden_answers.tolist()
+    但不改变 RL 关键字段的语义和值来源：
+    - question: 优先保留 extra_info 原值
+    - url: 优先保留 extra_info 原值
+    - gt: 优先保留 extra_info 原值，否则用 selected_answer / golden_answers[0]
+    - reward_model.ground_truth: 优先保留原值，否则用 golden_answers
+    """
+    extra_info = safe_eval(row.get("extra_info", {}))
+    reward_model = safe_eval(row.get("reward_model", {}))
+    prompt = safe_eval(row.get("prompt", []))
+
+    if not isinstance(extra_info, dict):
+        extra_info = {}
+    if not isinstance(reward_model, dict):
+        reward_model = {}
+
+    # ---- 1. 保留 question ----
+    question = str(extra_info.get("question", "")).strip()
+
+    # ---- 2. 保留 / 规范 golden_answers ----
+    raw_golden_answers = extra_info.get("golden_answers", [])
+    if isinstance(raw_golden_answers, np.ndarray):
+        golden_answers = raw_golden_answers.tolist()
+    elif isinstance(raw_golden_answers, list):
+        golden_answers = raw_golden_answers
+    elif raw_golden_answers in [None, ""]:
+        golden_answers = []
+    else:
+        golden_answers = [raw_golden_answers]
+
+    # ---- 3. 直接覆盖URL ----
+    default_url = "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing/"
+    # url = extra_info.get("url", "")
+
+    url = default_url
+    extra_info["url"] = url
+
+    # ---- 4. 保留 gt；缺失时才补 ----
+    if "gt" not in extra_info or extra_info["gt"] in [None, ""]:
+        if extra_info.get("selected_answer") not in [None, ""]:
+            extra_info["gt"] = extra_info["selected_answer"]
+        elif len(golden_answers) > 0:
+            extra_info["gt"] = golden_answers[0]
         else:
-            golden_answers = list(raw_golden_answers)
-            
-        # 【关键修复】使用 len() 判断是否为空，避免触发 Numpy 的布尔歧义报错
-        fallback_gt = golden_answers[0] if len(golden_answers) > 0 else ""
-        extra_info['gt'] = extra_info.get('selected_answer', fallback_gt)
-        extra_info['url'] = 'https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing'
-        extra_info['id'] = extra_info.get('index', 0)
+            extra_info["gt"] = ""
 
-    # --- 2. 修复 reward_model ---
-    if isinstance(reward_model, dict):
-        # 将 golden_answers 注入为 ground_truth
-        reward_model['ground_truth'] = golden_answers
+    # ---- 5. 保留 id；缺失时才补 ----
+    if "id" not in extra_info:
+        extra_info["id"] = extra_info.get("index", 0)
 
-    # --- 3. 修复 prompt ---
-    # 兼容 prompt 被解析为 numpy array 的情况
-    if isinstance(prompt, (list, np.ndarray)):
-        for p in prompt:
-            if isinstance(p, dict):
-                # 如果是 system prompt，替换为新的 system prompt
-                if p.get('role') == 'system':
-                    p['content'] = NEW_SYSTEM_PROMPT
-                # 保留原有功能：如果是 user prompt，构造合法格式
-                elif p.get('role') == 'user':
-                    legal_content = (
-                        f"Objective: {question}\n"
-                        f"            URL: https://www.wikipedia.org/\n"
-                        f"            Observation:None\n"
-                        f"            Parsed Previous Action:None\n            "
-                    )
-                    p['content'] = legal_content
-                
-        # 统一转回 list 方便后续 JSON 序列化
-        if isinstance(prompt, np.ndarray):
-            prompt = prompt.tolist()
+    # ---- 6. 保留 reward_model['ground_truth']；缺失时才补 ----
+    if "ground_truth" not in reward_model or reward_model["ground_truth"] in [None, ""]:
+        reward_model["ground_truth"] = golden_answers
 
-    # 更新行数据
-    row['extra_info'] = extra_info
-    row['reward_model'] = reward_model
-    row['prompt'] = prompt
-    
+    # ---- 7. 保留 reward_model['style']；缺失时才补 ----
+    if "style" not in reward_model:
+        reward_model["style"] = "rule"
+
+    # ---- 8. 统一 system + 初始 user prompt ----
+    initial_user_prompt = (
+        f"Objective: {question}\n"
+        f"URL: {url}\n"
+        f"Observation: None\n"
+        f"Parsed Previous Action: None"
+    )
+
+    prompt = [
+        {
+            "role": "system",
+            "content": NEW_SYSTEM_PROMPT
+        },
+        {
+            "role": "user",
+            "content": initial_user_prompt
+        }
+    ]
+
+    # ---- 9. 回写 ----
+    row["extra_info"] = extra_info
+    row["reward_model"] = reward_model
+    row["prompt"] = prompt
+
     return row
 
 def extract_and_export_data(parquet_path, output_dir, num_samples, output_prefix="extracted_data", use_exclude=False, exclude_json_path=None, seed=None):
@@ -224,7 +253,7 @@ def extract_and_export_data(parquet_path, output_dir, num_samples, output_prefix
     
     # ---------------- 核心修改点 ----------------
     print("正在格式化数据以适配训练要求 (补充 ground_truth、修改 prompt 格式等)...")
-    sampled_df = sampled_df.apply(adapt_to_legal_format, axis=1)
+    sampled_df = sampled_df.apply(adapt_to_rlhf_format, axis=1)
     # ---------------------------------------------
 
     # 4. 保存为 Parquet 文件
@@ -277,19 +306,51 @@ if __name__ == "__main__":
 python extract_rl.py \
   --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/train-00000-of-00001.parquet" \
   --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/nq/" \
-  --num_samples 1000 \
-  --output_prefix "train_1000" \
+  --num_samples 500 \
+  --output_prefix "train_500" \
   --use_exclude \
-  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/step-opsrc-5000/obj.json" \
+  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/obj.json" \
   --seed 42
 
 python extract_rl.py \
   --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/train-00000-of-00001.parquet" \
   --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/hotpot/" \
-  --num_samples 1000 \
-  --output_prefix "train_1000" \
+  --num_samples 500 \
+  --output_prefix "train_500" \
   --use_exclude \
-  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/step-opsrc-5000/obj.json" \
+  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/obj.json" \
+  --seed 42
+
+python extract_rl.py \
+  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/test-00000-of-00001.parquet" \
+  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/nq/" \
+  --num_samples 10 \
+  --output_prefix "test_10" \
+  --seed 42
+
+python extract_rl.py \
+  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/validation-00000-of-00001.parquet" \
+  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/hotpot/" \
+  --num_samples 10 \
+  --output_prefix "test_10" \
+  --seed 42
+
+python extract_rl.py \
+  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/train-00000-of-00001.parquet" \
+  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/sft_extract/" \
+  --num_samples 10000 \
+  --output_prefix "sft-nq-10000" \
+  --use_exclude \
+  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v1/obj_sum.json" \
+  --seed 42
+
+python extract_rl.py \
+  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/train-00000-of-00001.parquet" \
+  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/sft_extract/" \
+  --num_samples 10000 \
+  --output_prefix "sft-hotpot-10000" \
+  --use_exclude \
+  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v1/obj_sum.json" \
   --seed 42
 
 python extract_rl.py \

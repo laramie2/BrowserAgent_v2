@@ -99,6 +99,9 @@ VALID_MODES = list(MODE_FUNC_MAP.keys())
 
 
 def apply_transforms(text: str, role: str, modes: List[str]) -> str:
+    if modes is None:
+        return text
+    
     for mode in modes:
         text = MODE_FUNC_MAP[mode](text, role)
     return text
@@ -171,7 +174,8 @@ def convert_jsonl(
     print(f"✅ 转换完成！共处理了 {processed_count} 条数据。")
     print(f"📥 输入文件: {input_file}")
     print(f"📤 输出文件: {output_file}")
-    print(f"🛠️ 执行模式: {', '.join(modes)}")
+    if modes is not None:
+        print(f"🛠️ 执行模式: {', '.join(modes)}")
     if prompt_content is not None:
         print("📝 已使用外部 prompt 文件覆盖 system prompt")
 
@@ -199,10 +203,10 @@ if __name__ == "__main__":
         "--mode",
         type=str,
         nargs="+",
-        required=True,
+        default=None,  # 默认不采取转换
         choices=VALID_MODES + ["all"],
         help=(
-            "转换模式，可多选：\n"
+            "转换模式，可多选（不指定则不执行任何转换）：\n"
             "fence_to_action        : 将 </think>/<conclusion> 后的 ```...``` 转为 <action>...</action>\n"
             "remove_click_content   : 将 click [id] [content] 转为 click [id]\n"
             "bracket_to_angle       : 将动作参数 [x] 转为 <x>\n"
@@ -219,7 +223,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     modes = args.mode
-    if "all" in modes:
+    if modes is not None and "all" in modes:
         modes = [
             "fence_to_action",
             "remove_click_content",
@@ -275,8 +279,13 @@ python trans_format.py \
 
 """
 python trans_format.py \
-  --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-enhanced_format_yt_and_action/data.jsonl \
-  --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-enhanced_format_yt_and_action/data_1.jsonl \
-  --mode fence_to_action \
-  --prompt_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_enhance_yt_and_action.txt
+  --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-without_content-newadd2720/data.jsonl \
+  --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-without_content-newadd2720/data_1.jsonl \
+  --mode remove_click_content \
+  --prompt_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_without_content.txt
+
+python trans_format.py \
+  --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-new_add2720/data.jsonl \
+  --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-new_add2720/data_1.jsonl \
+  --prompt_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info.txt
 """

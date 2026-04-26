@@ -37,8 +37,8 @@ def interactive_browser(
 
     extra_field = {
         "question": "who plays the wildling woman in game of thrones",
-        "url": "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
-        # "url": "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
+        # "url": "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
+        "url": "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
         # "url": "https://www.wikipedia.org/"
         # "url": "https://www.baidu.com"
     }

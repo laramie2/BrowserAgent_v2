@@ -4,7 +4,31 @@ import csv
 import json
 from collections import defaultdict
 
-def format_score(s: str, is_success: bool = True) -> float:
+
+def is_valid_action_syntax(action_text: str) -> bool:
+    action_text = action_text.strip()
+
+    patterns = [
+        r"^click\s+\[\d+\]\s+\[.*\]$",
+        r"^type\s+\[\d+\]\s+\[.*\]\s+\[(0|1|press_enter_after=0|press_enter_after=1)\]$",
+        r"^hover\s+\[\d+\]\s+\[.*\]$",
+        r"^press\s+\[.+\]$",
+        r"^scroll\s+\[(down|up)\]$",
+
+        r"^new_tab$",
+        r"^tab_focus\s+\[\d+\]$",
+        r"^close_tab$",
+
+        r"^goto\s+\[.+\]$",
+        r"^go_back$",
+        r"^go_forward$",
+
+        r"^stop\s+\[.*\]$",
+    ]
+
+    return any(re.fullmatch(p, action_text, flags=re.DOTALL) for p in patterns)
+
+def format_score(s: str, is_success: bool = False) -> float:
     """
     给定字符串 s，基于以下规则进行打分:
         1) 有 <think> 标签(同时也要有 </think>) => 0.3
@@ -62,14 +86,15 @@ def format_score(s: str, is_success: bool = True) -> float:
         expected_block = f"```{action_text}```"
         if tail_content == expected_block:
             score += 0.2
+
+        # 5) 提取出的动作内容符合合法动作语法 => 0.2
+        if is_valid_action_syntax(action_text):
+            score += 0.2
+
     else:
         # 没能匹配到动作，不加这 0.2
         # 也没有第4条的可能了
         pass
-
-    # 5) 动作可被执行
-    if is_success:
-        score += 0.2
 
     return round(score, 3)
 

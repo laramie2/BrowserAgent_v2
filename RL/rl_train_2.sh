@@ -9,53 +9,57 @@ ln -sf /usr/lib/x86_64-linux-gnu/libcuda.so.1 $CONDA_PREFIX/lib/libcuda.so
 export LIBRARY_PATH=$CONDA_PREFIX/lib:$LIBRARY_PATH
 export RAY_TMPDIR="/DATA/disk0/yjb/yutao/ray_tmp/run2"
 mkdir -p $RAY_TMPDIR
-export RAY_PORT=6380
+export RAY_PORT=6379
 
-export CUDA_VISIBLE_DEVICES=5,6
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export WANDB_API_KEY=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
 
-export MASTER_PORT=29501
+export MASTER_PORT=29502
 
-# export WANDB_MODE="offline"
+# export export WANDB_MODE="offline"
 
 
 LOG_DIR="$(pwd)/logs"
 mkdir -p $LOG_DIR
 
-benchmark=hotpot
-dataset_name=train_5000
-train_data=$(pwd)/dataset/${benchmark}/${dataset_name}.parquet
-val_data=$(pwd)/dataset/${benchmark}/${dataset_name}.parquet
-model_name=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/models/Qwen2.5-VL-7B-Instruct-step-opsrc-5000-merged
+sft_model_name=task-opsrc-new_add2400-sft-5e-5lr-freeze_false-2epoch
+model_name=$(pwd)/models/Qwen2.5-VL-7B-Instruct-${sft_model_name}-merged
+
+benchmark=train_hotpot500_nq500
+val_dataset_name=test_20
+train_data=$(pwd)/dataset/${benchmark}/data.parquet
+# val_data=$(pwd)/dataset/${benchmark}/data.parquet
+val_data=$(pwd)/dataset/${val_dataset_name}/data.parquet
 rl_alg=mt_grpo # gae(ppo) or grpo, if grpo, then better set n>1 otherwise the group norm can not be effective
-n_gpus_per_node=2
+n_gpus_per_node=4
 n_nodes=1
-n=2
-train_batch_size=2
-val_batch_size=1
-ppo_mini_batch_size=2
+n=8
+train_batch_size=64
+val_batch_size=2
+ppo_mini_batch_size=8
 max_prompt_length=2048
-max_response_length=8192
+max_response_length=12288
 max_action_length=2048
-max_obs_length=4096
-temperature=0.5
+max_obs_length=2048
+temperature=0.7
 top_p=1.0
 enable_agent=True # enable agent for tool use
 strategy="fsdp"
 # action_stop_tokens='</action>'
 action_stop_tokens='<dummy_stop_token_never_generate>'
 action_extract_tokens='```'
-max_turns=3
-kl_loss_coef=0.0
+max_turns=15
+kl_loss_coef=0.001
 kl_coef=0
 entropy_coeff=0
 kl_loss_type=low_var_kl
 lr=1e-6
+epoch=8
 reward_manager=BrowserAgent
 ppo_micro_batch_size_per_gpu=1
 log_prob_micro_batch_size_per_gpu=8
 tensor_model_parallel_size=1
-gpu_memory_utilization=0.6 # higher gpu_memory_utilization will likely cause the vllm to OOM and get stuck, so set it to a lower value like 0.4 or 0.5
+gpu_memory_utilization=0.5 # higher gpu_memory_utilization will likely cause the vllm to OOM and get stuck, so set it to a lower value like 0.4 or 0.5
 do_offload=True # control actor's fsdp.[param|optimizer]_offload and actor_rollout_ref.rollout.fsdp.[param|optimizer]_offload; if gpu_memory_utilization is set to > 0.6, then do_offload should be set to True otherwise it will cause OOM
 use_dynamic_bsz=True # faster
 ulysses_sequence_parallel_size=1 # set to 1 for normal verl behavior, otherwise it will cause OOM
@@ -64,7 +68,7 @@ additional_eos_token_ids=[151645] # <|im_end|> token id
 mask_observations=True # mask observations for kl loss and gradient descent
 enable_mtrl=True # enable multi-turn training
 model_pretty_name=$(echo $model_name | tr '/' '_' | tr '[:upper:]' '[:lower:]')
-run_name_postfix="run_2gpus_2"
+run_name_postfix=""
 if [ "$enable_agent" = "True" ]; then
     run_name="${reward_manager}-${strategy}-agent-${model_pretty_name}-${benchmark}-${rl_alg}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}${run_name_postfix}"
 else
@@ -74,6 +78,7 @@ export VERL_RUN_ID=$run_name
 export NCCL_DEBUG=INFO
 export VLLM_USE_V1=1
 rollout_mode='async'
+# rollout_mode='sync'
 
 # temp file for action tokens as verl cannot pass special strs as params
 action_stop_tokens_file="$(pwd)$(mktemp)"
@@ -81,9 +86,15 @@ mkdir -p $(dirname $action_stop_tokens_file)
 echo -e -n "$action_stop_tokens" | tee $action_stop_tokens_file
 echo "action_stop_tokens_file=$action_stop_tokens_file"
 
+checkpoint_path=$(pwd)/checkpoints/${sft_model_name}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}/
+mkdir -p ${checkpoint_path}
+
 # temp file for action extract tokens
 action_extract_tokens_file="$(pwd)/$(mktemp)"
 echo -e -n "$action_extract_tokens" | tee $action_extract_tokens_file
+
+export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC=70
+export TEXT_BROWSER_ACTION_TIMEOUT_SEC=75
 
 host=$(hostname -i | awk '{print $1}')
 port=$(shuf -i 30000-31000 -n 1)
@@ -94,7 +105,8 @@ python -m verl_tool.servers.serve \
     --port $port \
     --tool_type "'text_browser'" \
     --use_ray True \
-    --max_concurrent_requests 64 \
+    --max_concurrent_requests 256 \
+    --request_timeout 80 \
     --uvi_workers 1 \
     --router_workers 1 \
     --log_directory "$LOG_DIR" > /dev/null 2>&1 &
@@ -145,6 +157,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.agent.action_stop_tokens=$action_stop_tokens_file \
     +actor_rollout_ref.agent.action_extract_tokens=$action_extract_tokens_file \
     actor_rollout_ref.agent.tool_call_timeout=90 \
+    +actor_rollout_ref.agent.tool_call_max_retries=0 \
     actor_rollout_ref.agent.enable_mtrl=$enable_mtrl \
     actor_rollout_ref.agent.max_action_length=$max_action_length \
     actor_rollout_ref.rollout.tensor_model_parallel_size=$tensor_model_parallel_size \
@@ -160,6 +173,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=$use_dynamic_bsz \
     actor_rollout_ref.rollout.max_num_seqs=512 \
     actor_rollout_ref.rollout.mode=$rollout_mode \
+    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=$use_dynamic_bsz \
     actor_rollout_ref.ref.fsdp_config.param_offload=$do_offload \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$log_prob_micro_batch_size_per_gpu \
@@ -179,10 +193,12 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=$n_nodes \
     +trainer.remove_previous_ckpt_in_save=True \
-    trainer.save_freq=2500 \
-    trainer.test_freq=2500 \
-    trainer.total_epochs=4 \
-    > "$LOG_DIR/train_2.log" 2>&1 
+    trainer.default_local_dir=$checkpoint_path \
+    trainer.save_freq=15 \
+    trainer.test_freq=1000 \
+    trainer.total_epochs=$epoch \
+    +trainer.save_last=True \
+    > "$LOG_DIR/train/${sft_model_name}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}.log" 2>&1 
 
 
 pkill -P -9 $server_pid

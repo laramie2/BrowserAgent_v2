@@ -62,12 +62,13 @@ def generate_image_for_observation(ob_text: str, output_dir: str, is_simple: boo
                 ob_text, 
                 use_compact_mode=True, 
                 max_width=2048, 
-                max_height=4096
+                max_height=2048
             )
         else:
             img, char_count = _local_vtc.render_text_to_image_simple(
                 ob_text, 
-                width=1024
+                width=1024,
+                aspect_ratio="1:1"
             )
 
         img.save(img_path)
@@ -286,13 +287,30 @@ if __name__ == "__main__":
 """
 python -m gen_seq.VTC_seq_para \
     --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft.jsonl \
-    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-simplified.jsonl \
-    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-simplified_images \
+    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-enhanced_format_without_content.jsonl \
+    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-enhanced_format_without_content_images \
     --level task \
-    --format opensource
-    --system_msg_path /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_seq/system_prompt_with_history_info_enhance.txt \
+    --format opensource \
+    --system_msg_path /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_enhance_without_content.txt \
+    --is_simple False
+
+python -m gen_seq.VTC_seq_para \
+    --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft.jsonl \
+    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-simplified-2.jsonl \
+    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-simplified-2_images \
+    --level task \
+    --format opensource \
+    --system_msg_path /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_enhance.txt \
     --is_simple True
 
+python -m gen_seq.VTC_seq_para \
+    --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_new_add2720.jsonl \
+    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-new_add2720.jsonl \
+    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-new_add2720_images \
+    --level task \
+    --format opensource \
+    --system_msg_path /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_enhance_yt_and_action.txt
+    
 python -m gen_seq.VTC_seq_para \
     --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft.jsonl \
     --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_step-opsrc-simplified.jsonl \

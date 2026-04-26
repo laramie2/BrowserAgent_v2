@@ -9,12 +9,12 @@ ln -sf /usr/lib/x86_64-linux-gnu/libcuda.so.1 $CONDA_PREFIX/lib/libcuda.so
 export LIBRARY_PATH=$CONDA_PREFIX/lib:$LIBRARY_PATH
 export RAY_TMPDIR="/DATA/disk0/yjb/yutao/ray_tmp/run1"
 mkdir -p $RAY_TMPDIR
-export RAY_PORT=6379
+export RAY_PORT=6378
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export WANDB_API_KEY=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
 
-export MASTER_PORT=29500
+export MASTER_PORT=29501
 
 # export export WANDB_MODE="offline"
 
@@ -22,27 +22,26 @@ export MASTER_PORT=29500
 LOG_DIR="$(pwd)/logs"
 mkdir -p $LOG_DIR
 
-benchmark=nq
-dataset_name=train_1000
-val_dataset_name=test_10
-train_data=$(pwd)/dataset/${benchmark}/${dataset_name}.parquet
-val_data=$(pwd)/dataset/${benchmark}/${val_dataset_name}.parquet
-checkpoint_path=$(pwd)/checkpoints
-model_name=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/models/Qwen2.5-VL-7B-Instruct-task-opsrc-5000stp-merged
-# model_name=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/checkpoints_1000_40/global_step_40/actor/huggingface
-resume_path=$(pwd)/checkpoints/global_step_100
+sft_model_name=task-opsrc-new_add2400-sft-5e-5lr-freeze_false-2epoch
+model_name=$(pwd)/models/Qwen2.5-VL-7B-Instruct-${sft_model_name}-merged
+
+benchmark=train_hotpot500_nq500
+val_dataset_name=test_20
+train_data=$(pwd)/dataset/${benchmark}/data.parquet
+# val_data=$(pwd)/dataset/${benchmark}/data.parquet
+val_data=$(pwd)/dataset/${val_dataset_name}/data.parquet
 rl_alg=mt_grpo # gae(ppo) or grpo, if grpo, then better set n>1 otherwise the group norm can not be effective
-n_gpus_per_node=8
+n_gpus_per_node=4
 n_nodes=1
-n=4
-train_batch_size=8
+n=6
+train_batch_size=64
 val_batch_size=2
 ppo_mini_batch_size=8
 max_prompt_length=2048
 max_response_length=12288
 max_action_length=2048
 max_obs_length=2048
-temperature=0.5
+temperature=0.7
 top_p=1.0
 enable_agent=True # enable agent for tool use
 strategy="fsdp"
@@ -50,11 +49,12 @@ strategy="fsdp"
 action_stop_tokens='<dummy_stop_token_never_generate>'
 action_extract_tokens='```'
 max_turns=15
-kl_loss_coef=0.0
+kl_loss_coef=0.001
 kl_coef=0
 entropy_coeff=0
 kl_loss_type=low_var_kl
 lr=1e-6
+epoch=8
 reward_manager=BrowserAgent
 ppo_micro_batch_size_per_gpu=1
 log_prob_micro_batch_size_per_gpu=8
@@ -68,7 +68,7 @@ additional_eos_token_ids=[151645] # <|im_end|> token id
 mask_observations=True # mask observations for kl loss and gradient descent
 enable_mtrl=True # enable multi-turn training
 model_pretty_name=$(echo $model_name | tr '/' '_' | tr '[:upper:]' '[:lower:]')
-run_name_postfix="run_8gpus_task5000_sync"
+run_name_postfix=""
 if [ "$enable_agent" = "True" ]; then
     run_name="${reward_manager}-${strategy}-agent-${model_pretty_name}-${benchmark}-${rl_alg}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}${run_name_postfix}"
 else
@@ -86,9 +86,15 @@ mkdir -p $(dirname $action_stop_tokens_file)
 echo -e -n "$action_stop_tokens" | tee $action_stop_tokens_file
 echo "action_stop_tokens_file=$action_stop_tokens_file"
 
+checkpoint_path=$(pwd)/checkpoints/${sft_model_name}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}/
+mkdir -p ${checkpoint_path}
+
 # temp file for action extract tokens
 action_extract_tokens_file="$(pwd)/$(mktemp)"
 echo -e -n "$action_extract_tokens" | tee $action_extract_tokens_file
+
+export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC=70
+export TEXT_BROWSER_ACTION_TIMEOUT_SEC=75
 
 host=$(hostname -i | awk '{print $1}')
 port=$(shuf -i 30000-31000 -n 1)
@@ -99,7 +105,8 @@ python -m verl_tool.servers.serve \
     --port $port \
     --tool_type "'text_browser'" \
     --use_ray True \
-    --max_concurrent_requests 64 \
+    --max_concurrent_requests 256 \
+    --request_timeout 80 \
     --uvi_workers 1 \
     --router_workers 1 \
     --log_directory "$LOG_DIR" > /dev/null 2>&1 &
@@ -150,6 +157,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.agent.action_stop_tokens=$action_stop_tokens_file \
     +actor_rollout_ref.agent.action_extract_tokens=$action_extract_tokens_file \
     actor_rollout_ref.agent.tool_call_timeout=90 \
+    +actor_rollout_ref.agent.tool_call_max_retries=0 \
     actor_rollout_ref.agent.enable_mtrl=$enable_mtrl \
     actor_rollout_ref.agent.max_action_length=$max_action_length \
     actor_rollout_ref.rollout.tensor_model_parallel_size=$tensor_model_parallel_size \
@@ -186,12 +194,11 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     trainer.nnodes=$n_nodes \
     +trainer.remove_previous_ckpt_in_save=True \
     trainer.default_local_dir=$checkpoint_path \
-    trainer.save_freq=25 \
+    trainer.save_freq=15 \
     trainer.test_freq=1000 \
-    trainer.total_epochs=1 \
+    trainer.total_epochs=$epoch \
     +trainer.save_last=True \
-    +trainer.resume_from_path=$resume_path \
-    > "$LOG_DIR/train.log" 2>&1 
+    > "$LOG_DIR/train/${sft_model_name}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}.log" 2>&1 
 
 
 pkill -P -9 $server_pid

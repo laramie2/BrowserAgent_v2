@@ -35,6 +35,6 @@ def jsonl_to_parquet_pandas(jsonl_file_path, parquet_file_path):
 
 if __name__ == "__main__":
     # 使用示例
-    jsonl_path = "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v2/sft-hotpot500-nq500-seed.jsonl"
-    parquet_path = "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v2/sft-hotpot500-nq500-seed.parquet"
+    jsonl_path = "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/train/train_hotpot500_nq500.jsonl"
+    parquet_path = "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/train/train_hotpot500_nq500.parquet"
     jsonl_to_parquet_pandas(jsonl_path, parquet_path)
