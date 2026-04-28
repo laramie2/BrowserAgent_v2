@@ -11,7 +11,7 @@ export RAY_TMPDIR="/DATA/disk0/yjb/yutao/ray_tmp/run1"
 mkdir -p $RAY_TMPDIR
 export RAY_PORT=6378
 
-export CUDA_VISIBLE_DEVICES=4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,5,6,7
 export WANDB_API_KEY=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
 
 export MASTER_PORT=29501
@@ -21,6 +21,18 @@ export MASTER_PORT=29501
 
 LOG_DIR="$(pwd)/logs"
 mkdir -p $LOG_DIR
+
+# ===== TRACE BLOCK START =====
+TRACE_DIR="$LOG_DIR/pid_trace"
+mkdir -p "$TRACE_DIR"
+TRACE_FILE="$TRACE_DIR/trace_$(date +%F_%H%M%S).log"
+
+log_trace() {
+    echo "[$(date '+%F %T')] $*" | tee -a "$TRACE_FILE"
+}
+
+log_trace "train_script_start shell_pid=$$ ppid=$PPID user=$(whoami) host=$(hostname)"
+# ===== TRACE BLOCK END =====
 
 sft_model_name=task-opsrc-new_add2400-sft-5e-5lr-freeze_false-2epoch
 model_name=$(pwd)/models/Qwen2.5-VL-7B-Instruct-${sft_model_name}-merged
@@ -36,12 +48,12 @@ n_nodes=1
 n=6
 train_batch_size=64
 val_batch_size=2
-ppo_mini_batch_size=8
+ppo_mini_batch_size=4
 max_prompt_length=2048
-max_response_length=12288
+max_response_length=8192
 max_action_length=2048
 max_obs_length=2048
-temperature=0.7
+temperature=0.5
 top_p=1.0
 enable_agent=True # enable agent for tool use
 strategy="fsdp"
@@ -49,17 +61,17 @@ strategy="fsdp"
 action_stop_tokens='<dummy_stop_token_never_generate>'
 action_extract_tokens='```'
 max_turns=15
-kl_loss_coef=0.001
+kl_loss_coef=0.005
 kl_coef=0
 entropy_coeff=0
 kl_loss_type=low_var_kl
-lr=1e-6
+lr=3e-7
 epoch=8
 reward_manager=BrowserAgent
 ppo_micro_batch_size_per_gpu=1
-log_prob_micro_batch_size_per_gpu=8
+log_prob_micro_batch_size_per_gpu=4
 tensor_model_parallel_size=1
-gpu_memory_utilization=0.5 # higher gpu_memory_utilization will likely cause the vllm to OOM and get stuck, so set it to a lower value like 0.4 or 0.5
+gpu_memory_utilization=0.4 # higher gpu_memory_utilization will likely cause the vllm to OOM and get stuck, so set it to a lower value like 0.4 or 0.5
 do_offload=True # control actor's fsdp.[param|optimizer]_offload and actor_rollout_ref.rollout.fsdp.[param|optimizer]_offload; if gpu_memory_utilization is set to > 0.6, then do_offload should be set to True otherwise it will cause OOM
 use_dynamic_bsz=True # faster
 ulysses_sequence_parallel_size=1 # set to 1 for normal verl behavior, otherwise it will cause OOM
@@ -93,8 +105,17 @@ mkdir -p ${checkpoint_path}
 action_extract_tokens_file="$(pwd)/$(mktemp)"
 echo -e -n "$action_extract_tokens" | tee $action_extract_tokens_file
 
-export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC=70
-export TEXT_BROWSER_ACTION_TIMEOUT_SEC=75
+# export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC=70
+# export TEXT_BROWSER_ACTION_TIMEOUT_SEC=75
+
+export TEXT_BROWSER_MAX_ACTIVE_ACTORS=128
+export TEXT_BROWSER_IDLE_POOL_SIZE=32
+export TEXT_BROWSER_ACTOR_CPUS=0.5
+
+export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC=160
+export TEXT_BROWSER_ACTION_TIMEOUT_SEC=160
+export TEXT_BROWSER_STEP_RETRIES=1
+export TEXT_BROWSER_INIT_RETRIES=1
 
 host=$(hostname -i | awk '{print $1}')
 port=$(shuf -i 30000-31000 -n 1)
@@ -105,16 +126,48 @@ python -m verl_tool.servers.serve \
     --port $port \
     --tool_type "'text_browser'" \
     --use_ray True \
-    --max_concurrent_requests 256 \
-    --request_timeout 80 \
-    --uvi_workers 1 \
-    --router_workers 1 \
+    --max_concurrent_requests 96 \
+    --request_timeout 180 \
+    --uvi_workers 4 \
+    --router_workers 4 \
     --log_directory "$LOG_DIR" > /dev/null 2>&1 &
 
 server_pid=$!
 
 echo "Server (pid=$server_pid) started at $tool_server_url"
+log_trace "tool_server_started pid=$server_pid tool_url=$tool_server_url"
 
+cleanup_server() {
+    if [ -n "${server_pid:-}" ] && kill -0 "$server_pid" 2>/dev/null; then
+        # Only cleanup the tool server process tree started by this script.
+        child_pids=$(pgrep -P "$server_pid" 2>/dev/null || true)
+        kill "$server_pid" 2>/dev/null || true
+        if [ -n "$child_pids" ]; then
+            kill $child_pids 2>/dev/null || true
+        fi
+        sleep 2
+        kill -9 "$server_pid" 2>/dev/null || true
+        if [ -n "$child_pids" ]; then
+            kill -9 $child_pids 2>/dev/null || true
+        fi
+    fi
+}
+
+# ===== TRACE BLOCK START =====
+on_signal_cleanup() {
+    sig="$1"
+    log_trace "signal_received sig=$sig shell_pid=$$ ppid=$PPID"
+    cleanup_server
+    exit 128
+}
+
+trap 'on_signal_cleanup SIGINT' INT
+trap 'on_signal_cleanup SIGTERM' TERM
+trap 'on_signal_cleanup SIGHUP' HUP
+# ===== TRACE BLOCK END =====
+
+TRAIN_START_TS="$(date '+%F %T')"
+log_trace "train_start ts=$TRAIN_START_TS"
 PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     algorithm.adv_estimator=$rl_alg \
     data.train_files=$train_data \
@@ -156,7 +209,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.agent.mask_observations=$mask_observations \
     actor_rollout_ref.agent.action_stop_tokens=$action_stop_tokens_file \
     +actor_rollout_ref.agent.action_extract_tokens=$action_extract_tokens_file \
-    actor_rollout_ref.agent.tool_call_timeout=90 \
+    actor_rollout_ref.agent.tool_call_timeout=180 \
     +actor_rollout_ref.agent.tool_call_max_retries=0 \
     actor_rollout_ref.agent.enable_mtrl=$enable_mtrl \
     actor_rollout_ref.agent.max_action_length=$max_action_length \
@@ -171,7 +224,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.rollout.top_k=-1 \
     actor_rollout_ref.rollout.n=$n \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=$use_dynamic_bsz \
-    actor_rollout_ref.rollout.max_num_seqs=512 \
+    actor_rollout_ref.rollout.max_num_seqs=128 \
     actor_rollout_ref.rollout.mode=$rollout_mode \
     actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=$use_dynamic_bsz \
@@ -198,8 +251,13 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     trainer.test_freq=1000 \
     trainer.total_epochs=$epoch \
     +trainer.save_last=True \
-    > "$LOG_DIR/train/${sft_model_name}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}.log" 2>&1 
+    > "$LOG_DIR/train/${sft_model_name}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}.log" 2>&1
 
-
-pkill -P -9 $server_pid
-kill -9 $server_pid
+train_exit_code=$?
+TRAIN_END_TS="$(date '+%F %T')"
+RAYLET_PID=$(pgrep -f "raylet" | head -n1 || true)
+DRIVER_PIDS=$(pgrep -f "python-core-driver|main_ppo|verl_tool.trainer" | tr '\n' ',' || true)
+log_trace "train_end ts=$TRAIN_END_TS exit_code=$train_exit_code"
+log_trace "runtime_pids raylet_pid=${RAYLET_PID:-NA} driver_pids=${DRIVER_PIDS:-NA}"
+cleanup_server
+exit $train_exit_code

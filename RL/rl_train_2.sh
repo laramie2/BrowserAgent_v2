@@ -22,6 +22,18 @@ export MASTER_PORT=29502
 LOG_DIR="$(pwd)/logs"
 mkdir -p $LOG_DIR
 
+# ===== TRACE BLOCK START =====
+TRACE_DIR="$LOG_DIR/pid_trace"
+mkdir -p "$TRACE_DIR"
+TRACE_FILE="$TRACE_DIR/trace_$(date +%F_%H%M%S).log"
+
+log_trace() {
+    echo "[$(date '+%F %T')] $*" | tee -a "$TRACE_FILE"
+}
+
+log_trace "train_script_start shell_pid=$$ ppid=$PPID user=$(whoami) host=$(hostname)"
+# ===== TRACE BLOCK END =====
+
 sft_model_name=task-opsrc-new_add2400-sft-5e-5lr-freeze_false-2epoch
 model_name=$(pwd)/models/Qwen2.5-VL-7B-Instruct-${sft_model_name}-merged
 
@@ -114,7 +126,39 @@ python -m verl_tool.servers.serve \
 server_pid=$!
 
 echo "Server (pid=$server_pid) started at $tool_server_url"
+log_trace "tool_server_started pid=$server_pid tool_url=$tool_server_url"
 
+cleanup_server() {
+    if [ -n "${server_pid:-}" ] && kill -0 "$server_pid" 2>/dev/null; then
+        # Only cleanup the tool server process tree started by this script.
+        child_pids=$(pgrep -P "$server_pid" 2>/dev/null || true)
+        kill "$server_pid" 2>/dev/null || true
+        if [ -n "$child_pids" ]; then
+            kill $child_pids 2>/dev/null || true
+        fi
+        sleep 2
+        kill -9 "$server_pid" 2>/dev/null || true
+        if [ -n "$child_pids" ]; then
+            kill -9 $child_pids 2>/dev/null || true
+        fi
+    fi
+}
+
+# ===== TRACE BLOCK START =====
+on_signal_cleanup() {
+    sig="$1"
+    log_trace "signal_received sig=$sig shell_pid=$$ ppid=$PPID"
+    cleanup_server
+    exit 128
+}
+
+trap 'on_signal_cleanup SIGINT' INT
+trap 'on_signal_cleanup SIGTERM' TERM
+trap 'on_signal_cleanup SIGHUP' HUP
+# ===== TRACE BLOCK END =====
+
+TRAIN_START_TS="$(date '+%F %T')"
+log_trace "train_start ts=$TRAIN_START_TS"
 PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     algorithm.adv_estimator=$rl_alg \
     data.train_files=$train_data \
@@ -198,8 +242,13 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     trainer.test_freq=1000 \
     trainer.total_epochs=$epoch \
     +trainer.save_last=True \
-    > "$LOG_DIR/train/${sft_model_name}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}.log" 2>&1 
+    > "$LOG_DIR/train/${sft_model_name}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}.log" 2>&1
 
-
-pkill -P -9 $server_pid
-kill -9 $server_pid
+train_exit_code=$?
+TRAIN_END_TS="$(date '+%F %T')"
+RAYLET_PID=$(pgrep -f "raylet" | head -n1 || true)
+DRIVER_PIDS=$(pgrep -f "python-core-driver|main_ppo|verl_tool.trainer" | tr '\n' ',' || true)
+log_trace "train_end ts=$TRAIN_END_TS exit_code=$train_exit_code"
+log_trace "runtime_pids raylet_pid=${RAYLET_PID:-NA} driver_pids=${DRIVER_PIDS:-NA}"
+cleanup_server
+exit $train_exit_code
