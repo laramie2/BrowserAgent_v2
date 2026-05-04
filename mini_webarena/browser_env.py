@@ -134,6 +134,15 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         self.page_ready_exception_delay = float(
             os.getenv("MINI_WEB_ARENA_READY_EXCEPTION_DELAY", "0.5")
         )
+        self.stop_before_observation = os.getenv(
+            "MINI_WEB_ARENA_STOP_BEFORE_OBS", "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        self.observation_retry_count = int(
+            os.getenv("MINI_WEB_ARENA_OBS_RETRIES", "3")
+        )
+        self.observation_retry_delay = float(
+            os.getenv("MINI_WEB_ARENA_OBS_RETRY_DELAY", "0.5")
+        )
 
         match observation_type:
             case "html" | "accessibility_tree":
@@ -212,6 +221,26 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
 
     def get_page_client(self, page: Page) -> CDPSession:
         return page.client  # type: ignore
+
+    @staticmethod
+    def _accessibility_root_is_busy(root_node: dict[str, Any]) -> bool:
+        if bool(root_node.get("busy", False)):
+            return True
+        for prop in root_node.get("properties", []):
+            try:
+                if prop.get("name") == "busy":
+                    return bool(prop.get("value", {}).get("value", False))
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _is_sparse_accessibility_observation(observation: dict[str, Observation]) -> bool:
+        text_obs = str(observation.get("text") or "").strip()
+        if not text_obs:
+            return True
+        lines = [line for line in text_obs.splitlines() if line.strip()]
+        return len(lines) <= 1 and "RootWebArea" in text_obs
 
     def _navigate_with_retry(self, page: Page, url: str, max_retries: int = 3, timeout: int = 300000) -> bool:
         """
@@ -295,7 +324,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
                         tree_response = client.send("Accessibility.getFullAXTree")
                         if tree_response and 'nodes' in tree_response:
                             root_node = tree_response['nodes'][0] if tree_response['nodes'] else {}
-                            is_busy = root_node.get('busy', False)
+                            is_busy = self._accessibility_root_is_busy(root_node)
                             
                             if not is_busy:
                                 print(f"[DEBUG] 页面不再忙碌，等待完成 (耗时: {time.time() - start_time:.2f}秒)")
@@ -332,15 +361,36 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             time.sleep(self.page_ready_exception_delay)
 
     def _get_obs(self) -> dict[str, Observation]:
-        try:
-            # 强行停止任何正在进行的网络请求或动画，暴力解除 busy
-            self.page.evaluate("window.stop()")
-        except:
-            pass
-        obs = self.observation_handler.get_observation(
-            self.page, self.get_page_client(self.page)
-        )
-        return obs
+        if self.stop_before_observation:
+            try:
+                self.page.evaluate("window.stop()")
+            except Exception:
+                pass
+
+        last_obs = None
+        max_attempts = max(1, self.observation_retry_count)
+        for attempt in range(max_attempts):
+            obs = self.observation_handler.get_observation(
+                self.page, self.get_page_client(self.page)
+            )
+            last_obs = obs
+            if (
+                self.text_observation_type != "accessibility_tree"
+                or not self._is_sparse_accessibility_observation(obs)
+            ):
+                return obs
+
+            if attempt + 1 < max_attempts:
+                try:
+                    self.page.wait_for_load_state(
+                        "domcontentloaded",
+                        timeout=self.domcontentloaded_timeout_ms,
+                    )
+                except Exception:
+                    pass
+                time.sleep(self.observation_retry_delay)
+
+        return last_obs
 
     def _get_obs_metadata(self) -> dict[str, ObservationMetadata]:
         metadata = self.observation_handler.get_observation_metadata()

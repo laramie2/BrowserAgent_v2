@@ -11,7 +11,7 @@ export RAY_TMPDIR="/DATA/disk0/yjb/yutao/ray_tmp/run2"
 mkdir -p $RAY_TMPDIR
 export RAY_PORT=6379
 
-export CUDA_VISIBLE_DEVICES=4,5,6,7
+export CUDA_VISIBLE_DEVICES=1,2,3,4
 export WANDB_API_KEY=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
 
 export MASTER_PORT=29502
@@ -45,15 +45,15 @@ val_data=$(pwd)/dataset/${val_dataset_name}/data.parquet
 rl_alg=mt_grpo # gae(ppo) or grpo, if grpo, then better set n>1 otherwise the group norm can not be effective
 n_gpus_per_node=4
 n_nodes=1
-n=8
-train_batch_size=64
+n=${ROLLOUT_N_OVERRIDE:-6}
+train_batch_size=${TRAIN_BATCH_SIZE_OVERRIDE:-64}
 val_batch_size=2
-ppo_mini_batch_size=8
+ppo_mini_batch_size=4
 max_prompt_length=2048
-max_response_length=12288
+max_response_length=8192
 max_action_length=2048
 max_obs_length=2048
-temperature=0.7
+temperature=0.5
 top_p=1.0
 enable_agent=True # enable agent for tool use
 strategy="fsdp"
@@ -61,18 +61,19 @@ strategy="fsdp"
 action_stop_tokens='<dummy_stop_token_never_generate>'
 action_extract_tokens='```'
 max_turns=15
-kl_loss_coef=0.001
+kl_loss_coef=0.005
 kl_coef=0
 entropy_coeff=0
 kl_loss_type=low_var_kl
-lr=1e-6
+lr=1e-7
 epoch=8
 reward_manager=BrowserAgent
 ppo_micro_batch_size_per_gpu=1
-log_prob_micro_batch_size_per_gpu=8
+log_prob_micro_batch_size_per_gpu=${LOG_PROB_MBS_OVERRIDE:-4}
 tensor_model_parallel_size=1
-gpu_memory_utilization=0.5 # higher gpu_memory_utilization will likely cause the vllm to OOM and get stuck, so set it to a lower value like 0.4 or 0.5
-do_offload=True # control actor's fsdp.[param|optimizer]_offload and actor_rollout_ref.rollout.fsdp.[param|optimizer]_offload; if gpu_memory_utilization is set to > 0.6, then do_offload should be set to True otherwise it will cause OOM
+gpu_memory_utilization=0.4 # higher gpu_memory_utilization will likely cause the vllm to OOM and get stuck, so set it to a lower value like 0.4 or 0.5
+default_do_offload=True
+do_offload=${DO_OFFLOAD:-$default_do_offload} # 4-GPU runs keep CPU offload by default, but you can override with DO_OFFLOAD=False.
 use_dynamic_bsz=True # faster
 ulysses_sequence_parallel_size=1 # set to 1 for normal verl behavior, otherwise it will cause OOM
 fsdp_size=-1
@@ -92,6 +93,20 @@ export VLLM_USE_V1=1
 rollout_mode='async'
 # rollout_mode='sync'
 
+# Real rollout concurrency is roughly train_batch_size * n before agent-side
+# throttling. Cap it explicitly to avoid CPU/Ray OOM in multi-turn runs.
+agent_loop_num_workers=${AGENT_LOOP_NUM_WORKERS:-2}
+max_concurrent_trajectories=${MAX_CONCURRENT_TRAJECTORIES:-16}
+tool_server_max_concurrent_requests=${TOOL_SERVER_MAX_CONCURRENT_REQUESTS:-16}
+text_browser_max_active_actors=${TEXT_BROWSER_MAX_ACTIVE_ACTORS_OVERRIDE:-16}
+text_browser_idle_pool_size=${TEXT_BROWSER_IDLE_POOL_SIZE_OVERRIDE:-4}
+text_browser_actor_cpus=${TEXT_BROWSER_ACTOR_CPUS_OVERRIDE:-1}
+pass_extra_fields_to_reward=${PASS_EXTRA_FIELDS_TO_REWARD:-False}
+reward_fn_async=${REWARD_FN_ASYNC:-False}
+compact_tool_interact_info=${COMPACT_TOOL_INTERACT_INFO:-True}
+rollout_max_num_seqs=${ROLLOUT_MAX_NUM_SEQS_OVERRIDE:-128}
+rollout_max_num_batched_tokens=${ROLLOUT_MAX_BATCHED_TOKENS_OVERRIDE:-16384}
+
 # temp file for action tokens as verl cannot pass special strs as params
 action_stop_tokens_file="$(pwd)$(mktemp)"
 mkdir -p $(dirname $action_stop_tokens_file)
@@ -105,8 +120,17 @@ mkdir -p ${checkpoint_path}
 action_extract_tokens_file="$(pwd)/$(mktemp)"
 echo -e -n "$action_extract_tokens" | tee $action_extract_tokens_file
 
-export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC=70
-export TEXT_BROWSER_ACTION_TIMEOUT_SEC=75
+# export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC=70
+# export TEXT_BROWSER_ACTION_TIMEOUT_SEC=75
+
+export TEXT_BROWSER_MAX_ACTIVE_ACTORS=$text_browser_max_active_actors
+export TEXT_BROWSER_IDLE_POOL_SIZE=$text_browser_idle_pool_size
+export TEXT_BROWSER_ACTOR_CPUS=$text_browser_actor_cpus
+
+export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC=160
+export TEXT_BROWSER_ACTION_TIMEOUT_SEC=160
+export TEXT_BROWSER_STEP_RETRIES=1
+export TEXT_BROWSER_INIT_RETRIES=1
 
 host=$(hostname -i | awk '{print $1}')
 port=$(shuf -i 30000-31000 -n 1)
@@ -117,10 +141,10 @@ python -m verl_tool.servers.serve \
     --port $port \
     --tool_type "'text_browser'" \
     --use_ray True \
-    --max_concurrent_requests 256 \
-    --request_timeout 80 \
-    --uvi_workers 1 \
-    --router_workers 1 \
+    --max_concurrent_requests $tool_server_max_concurrent_requests \
+    --request_timeout 180 \
+    --uvi_workers 4 \
+    --router_workers 4 \
     --log_directory "$LOG_DIR" > /dev/null 2>&1 &
 
 server_pid=$!
@@ -169,7 +193,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     data.max_response_length=$max_response_length \
     data.truncation='right' \
     reward_model.reward_manager=$reward_manager \
-    reward_model.launch_reward_fn_async=True \
+    reward_model.launch_reward_fn_async=$reward_fn_async \
     actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.optim.lr=$lr \
@@ -200,10 +224,13 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.agent.mask_observations=$mask_observations \
     actor_rollout_ref.agent.action_stop_tokens=$action_stop_tokens_file \
     +actor_rollout_ref.agent.action_extract_tokens=$action_extract_tokens_file \
-    actor_rollout_ref.agent.tool_call_timeout=90 \
+    actor_rollout_ref.agent.tool_call_timeout=180 \
     +actor_rollout_ref.agent.tool_call_max_retries=0 \
     actor_rollout_ref.agent.enable_mtrl=$enable_mtrl \
     actor_rollout_ref.agent.max_action_length=$max_action_length \
+    actor_rollout_ref.agent.max_concurrent_trajectories=$max_concurrent_trajectories \
+    +actor_rollout_ref.agent.pass_extra_fields_to_reward=$pass_extra_fields_to_reward \
+    +actor_rollout_ref.agent.compact_tool_interact_info=$compact_tool_interact_info \
     actor_rollout_ref.rollout.tensor_model_parallel_size=$tensor_model_parallel_size \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=$log_prob_micro_batch_size_per_gpu \
     actor_rollout_ref.rollout.enforce_eager=True \
@@ -214,10 +241,11 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.rollout.top_p=$top_p \
     actor_rollout_ref.rollout.top_k=-1 \
     actor_rollout_ref.rollout.n=$n \
+    actor_rollout_ref.rollout.agent.num_workers=$agent_loop_num_workers \
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=$use_dynamic_bsz \
-    actor_rollout_ref.rollout.max_num_seqs=512 \
+    actor_rollout_ref.rollout.max_num_seqs=$rollout_max_num_seqs \
     actor_rollout_ref.rollout.mode=$rollout_mode \
-    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=$rollout_max_num_batched_tokens \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=$use_dynamic_bsz \
     actor_rollout_ref.ref.fsdp_config.param_offload=$do_offload \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$log_prob_micro_batch_size_per_gpu \

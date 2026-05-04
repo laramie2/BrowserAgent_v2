@@ -5,6 +5,7 @@ import os
 import re
 from functools import lru_cache
 from typing import Dict, Tuple
+from urllib.parse import urlparse, urlunparse
 
 # 假设你的 BaseLanguageBasedEnv 就在同目录下的 base.py
 from .env_base import BaseLanguageBasedEnv
@@ -22,6 +23,7 @@ from .browser_env import ScriptBrowserEnv
 
 DEFAULT_BROWSER_URL = "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
 DEFAULT_PROMPT_MODEL = os.getenv("MINI_WEB_ARENA_PROMPT_MODEL", "Qwen/Qwen2.5-14B-Instruct")
+DEFAULT_KIWIX_ENTRY_PATH = "/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -29,6 +31,35 @@ def _env_flag(name: str, default: bool) -> bool:
     if raw_value is None:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_start_url(url: str | None) -> str:
+    url = url or DEFAULT_BROWSER_URL
+    if not _env_flag("MINI_WEB_ARENA_NORMALIZE_KIWIX_ROOT", True):
+        return url
+
+    parsed = urlparse(url)
+    try:
+        kiwix_port = int(os.getenv("MINI_WEB_ARENA_KIWIX_PORT", "22015"))
+    except ValueError:
+        kiwix_port = 22015
+
+    if (
+        parsed.scheme in {"http", "https"}
+        and parsed.path in {"", "/"}
+        and parsed.port == kiwix_port
+    ):
+        return urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                DEFAULT_KIWIX_ENTRY_PATH,
+                "",
+                "",
+                "",
+            )
+        )
+    return url
 
 
 @lru_cache(maxsize=1)
@@ -79,7 +110,7 @@ class WikiQAEnv(object):
         )
 
         self.prompt_constructor, self.tokenizer, _ = _get_prompt_runtime(DEFAULT_PROMPT_MODEL)
-        self.url = url or DEFAULT_BROWSER_URL
+        self.url = _normalize_start_url(url)
         obs, _ = self.env.reset_without_config(start_url=self.url)
         self.history = [{"role": "system"}, {"role": "user", "question": self.question, "url": self.url,
                                              "observation": obs[self.obs_modality], "previous_action": None}]
