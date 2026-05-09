@@ -114,7 +114,31 @@ def extract_question_from_row(extra_info):
         pass
     return ""
 
-def adapt_to_rlhf_format(row):
+def infer_data_source(parquet_path=None, output_dir=None):
+    """
+    Infer a dataset-level data_source from common BrowserAgent-SeedData paths.
+    This lets rollout logs distinguish task categories such as nq / hotpot
+    instead of keeping every sample under a generic wiki_qa source.
+    """
+    candidate_names = {
+        "nq",
+        "hotpot",
+        "triviaqa",
+        "webq",
+        "webquestions",
+        "musique",
+        "2wikimultihopqa",
+    }
+
+    paths = [p for p in [parquet_path, output_dir] if p]
+    for path in paths:
+        parts = [part.lower() for part in os.path.normpath(str(path)).split(os.sep)]
+        for part in reversed(parts):
+            if part in candidate_names:
+                return part
+    return None
+
+def adapt_to_rlhf_format(row, data_source=None):
     """
     统一 prompt 为:
     [
@@ -136,6 +160,13 @@ def adapt_to_rlhf_format(row):
         extra_info = {}
     if not isinstance(reward_model, dict):
         reward_model = {}
+
+    if data_source:
+        row["data_source"] = data_source
+    elif "data_source" not in row or row.get("data_source") in [None, ""]:
+        row["data_source"] = extra_info.get("data_source", "unknown")
+
+    extra_info["data_source"] = row.get("data_source", "unknown")
 
     # ---- 1. 保留 question ----
     question = str(extra_info.get("question", "")).strip()
@@ -205,7 +236,7 @@ def adapt_to_rlhf_format(row):
 
     return row
 
-def extract_and_export_data(parquet_path, output_dir, num_samples, output_prefix="extracted_data", use_exclude=False, exclude_json_path=None, seed=None):
+def extract_and_export_data(parquet_path, output_dir, num_samples, output_prefix="extracted_data", use_exclude=False, exclude_json_path=None, seed=None, data_source=None):
     """
     读取Parquet，(可选)过滤问题，(可选)随机提取指定数量并保存为 JSONL 和 Parquet。
     """
@@ -252,8 +283,14 @@ def extract_and_export_data(parquet_path, output_dir, num_samples, output_prefix
     print(f"最终准备导出的数据量: {len(sampled_df)} 条")
     
     # ---------------- 核心修改点 ----------------
+    resolved_data_source = data_source or infer_data_source(parquet_path, output_dir)
+    if resolved_data_source:
+        print(f"将 data_source 写为数据集类别: {resolved_data_source}")
+    else:
+        print("未指定或推断出 data_source，将保留原始字段。")
+
     print("正在格式化数据以适配训练要求 (补充 ground_truth、修改 prompt 格式等)...")
-    sampled_df = sampled_df.apply(adapt_to_rlhf_format, axis=1)
+    sampled_df = sampled_df.apply(lambda row: adapt_to_rlhf_format(row, resolved_data_source), axis=1)
     # ---------------------------------------------
 
     # 4. 保存为 Parquet 文件
@@ -285,6 +322,7 @@ if __name__ == "__main__":
     
     # 随机抽样相关参数
     parser.add_argument("--seed", type=int, default=None, help="随机种子。提供此参数(例如42)将开启随机抽样，否则按顺序截取。")
+    parser.add_argument("--data_source", type=str, default=None, help="覆盖导出数据的 data_source/task category，例如 nq 或 hotpot。默认从路径推断。")
     
     args = parser.parse_args()
     
@@ -298,7 +336,8 @@ if __name__ == "__main__":
         output_prefix=args.output_prefix,
         use_exclude=args.use_exclude,
         exclude_json_path=args.exclude_json,
-        seed=args.seed
+        seed=args.seed,
+        data_source=args.data_source
     )
 
 
@@ -306,8 +345,8 @@ if __name__ == "__main__":
 python extract_rl.py \
   --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/train-00000-of-00001.parquet" \
   --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/nq/" \
-  --num_samples 500 \
-  --output_prefix "train_500" \
+  --num_samples 1000 \
+  --output_prefix "train_1000_labelled" \
   --use_exclude \
   --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/obj.json" \
   --seed 42
@@ -315,8 +354,8 @@ python extract_rl.py \
 python extract_rl.py \
   --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/train-00000-of-00001.parquet" \
   --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/hotpot/" \
-  --num_samples 500 \
-  --output_prefix "train_500" \
+  --num_samples 1000 \
+  --output_prefix "train_1000_labelled" \
   --use_exclude \
   --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/obj.json" \
   --seed 42

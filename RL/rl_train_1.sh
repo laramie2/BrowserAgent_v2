@@ -18,11 +18,31 @@ export WANDB_API_KEY=wandb_v1_V87V1kdSf4ksYcXVKZXmneUEfX0_QYSUnBSgaZEFtVBHxjo8jn
 
 export MASTER_PORT="${MASTER_PORT_OVERRIDE:-29501}"
 
-LOG_DIR="$(pwd)/logs"
-mkdir -p "$LOG_DIR"
-mkdir -p "$LOG_DIR/train"
+sft_model_name="${SFT_MODEL_NAME_OVERRIDE:-task-opsrc_12619-sft-5e-5lr-freeze_false-2epoch}"
+model_name=$(pwd)/models/Qwen2.5-VL-7B-Instruct-${sft_model_name}-merged
+export MINI_WEB_ARENA_PROMPT_MODEL="$model_name"
+export TRANSFORMERS_OFFLINE=1
+export HF_HUB_OFFLINE=1
 
-TRACE_DIR="$LOG_DIR/pid_trace"
+benchmark="${BENCHMARK_OVERRIDE:-train_hotpot500_nq500}"
+val_dataset_name="${VAL_DATASET_NAME_OVERRIDE:-test_20}"
+train_data=$(pwd)/dataset/${benchmark}/data.parquet
+val_data=$(pwd)/dataset/${val_dataset_name}/data.parquet
+
+sanitize_path_component() {
+    printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'
+}
+
+model_log_component="$(sanitize_path_component "$sft_model_name")"
+data_log_component="$(sanitize_path_component "${benchmark}_val-${val_dataset_name}")"
+LOG_CONTEXT_DIR="${LOG_CONTEXT_DIR_OVERRIDE:-${model_log_component}/${data_log_component}}"
+
+LOG_DIR="${LOG_DIR_OVERRIDE:-$(pwd)/logs}"
+TRAIN_LOG_DIR="$LOG_DIR/train/$LOG_CONTEXT_DIR"
+mkdir -p "$LOG_DIR"
+mkdir -p "$TRAIN_LOG_DIR"
+
+TRACE_DIR="$LOG_DIR/pid_trace/$LOG_CONTEXT_DIR"
 mkdir -p "$TRACE_DIR"
 TRACE_FILE="$TRACE_DIR/trace_${RUN_TAG}_$(date +%F_%H%M%S).log"
 
@@ -31,19 +51,9 @@ log_trace() {
 }
 
 log_trace "train_script_start run_tag=$RUN_TAG shell_pid=$$ ppid=$PPID user=$(whoami) host=$(hostname)"
-
-sft_model_name=task-opsrc-new_add2400-sft-5e-5lr-freeze_false-2epoch
-model_name=$(pwd)/models/Qwen2.5-VL-7B-Instruct-${sft_model_name}-merged
-export MINI_WEB_ARENA_PROMPT_MODEL="$model_name"
-export TRANSFORMERS_OFFLINE=1
-export HF_HUB_OFFLINE=1
-
-benchmark=train_hotpot500_nq500
-val_dataset_name=test_20
-train_data=$(pwd)/dataset/${benchmark}/data.parquet
-val_data=$(pwd)/dataset/${val_dataset_name}/data.parquet
+log_trace "log_context_dir=$LOG_CONTEXT_DIR sft_model_name=$sft_model_name benchmark=$benchmark val_dataset_name=$val_dataset_name"
 # 添加分层抽样的标签范围参数
-enable_stratified_sampler=True
+enable_stratified_sampler=False
 stratified_hotpot_count=500
 stratified_nq_count=500
 stratified_total_count=$((stratified_hotpot_count + stratified_nq_count))
@@ -81,7 +91,7 @@ strategy="fsdp"
 action_stop_tokens='<dummy_stop_token_never_generate>'
 action_extract_tokens='```'
 
-max_turns=${MAX_TURNS_OVERRIDE:-15}
+max_turns=${MAX_TURNS_OVERRIDE:-8}
 
 kl_loss_coef=${KL_LOSS_COEF_OVERRIDE:-0.005}
 kl_coef=${KL_COEF_OVERRIDE:-0}
@@ -89,13 +99,14 @@ entropy_coeff=${ENTROPY_COEFF_OVERRIDE:-0}
 kl_loss_type=low_var_kl
 
 lr=${LR_OVERRIDE:-5e-7}
+lr_warmup_steps=${LR_WARMUP_STEPS_OVERRIDE:-10}
 epoch=${EPOCH_OVERRIDE:-8}
 
 reward_manager=BrowserAgent
 ppo_micro_batch_size_per_gpu=1
 log_prob_micro_batch_size_per_gpu=${LOG_PROB_MBS_OVERRIDE:-4}
 tensor_model_parallel_size=1
-gpu_memory_utilization=${GPU_MEMORY_UTILIZATION_OVERRIDE:-0.32}
+gpu_memory_utilization=${GPU_MEMORY_UTILIZATION_OVERRIDE:-0.3}
 
 do_offload=False
 critic_param_offload=${CRITIC_PARAM_OFFLOAD_OVERRIDE:-False}
@@ -109,14 +120,18 @@ additional_eos_token_ids=[151645]
 mask_observations=True
 enable_mtrl=True
 
-model_pretty_name=$(echo "$model_name" | tr '/' '_' | tr '[:upper:]' '[:lower:]')
+model_pretty_name="${MODEL_PRETTY_NAME_OVERRIDE:-$sft_model_name}"
+model_pretty_name=$(echo "$model_pretty_name" | tr '/' '_' | tr '[:upper:]' '[:lower:]')
+data_pretty_name="${DATA_PRETTY_NAME_OVERRIDE:-${benchmark}_val-${val_dataset_name}}"
+data_pretty_name=$(echo "$data_pretty_name" | tr '/' '_' | tr '[:upper:]' '[:lower:]')
 run_name_postfix="${RUN_NAME_POSTFIX:-}"
 
 if [ "$enable_agent" = "True" ]; then
-    run_name="${reward_manager}-${strategy}-agent-${model_pretty_name}-${benchmark}-${rl_alg}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}${run_name_postfix}"
+    run_name="${reward_manager}-${strategy}-agent-${model_pretty_name}-${data_pretty_name}-${rl_alg}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}${run_name_postfix}"
 else
-    run_name="${reward_manager}-${strategy}-${model_pretty_name}-${benchmark}-${rl_alg}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}${run_name_postfix}"
+    run_name="${reward_manager}-${strategy}-${model_pretty_name}-${data_pretty_name}-${rl_alg}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}${run_name_postfix}"
 fi
+run_name="${WANDB_RUN_NAME_OVERRIDE:-$run_name}"
 
 export VERL_RUN_ID="$run_name"
 export NCCL_DEBUG=INFO
@@ -142,7 +157,7 @@ mkdir -p "$(dirname "$action_stop_tokens_file")"
 echo -e -n "$action_stop_tokens" | tee "$action_stop_tokens_file"
 echo "action_stop_tokens_file=$action_stop_tokens_file"
 
-checkpoint_path=$(pwd)/checkpoints/${sft_model_name}-${RUN_TAG}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}/
+checkpoint_path=$(pwd)/checkpoints/${sft_model_name}-${benchmark}/${RUN_TAG}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}/
 mkdir -p "$checkpoint_path"
 
 action_extract_tokens_file="$(pwd)/$(mktemp)"
@@ -206,7 +221,8 @@ trap 'on_signal_cleanup SIGHUP' HUP
 TRAIN_START_TS="$(date '+%F %T')"
 log_trace "train_start ts=$TRAIN_START_TS run_name=$run_name"
 
-train_log_name="${RUN_TAG}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}"
+default_train_log_name="${RUN_TAG}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}"
+train_log_name="${TRAIN_LOG_NAME_OVERRIDE:-$default_train_log_name}"
 
 PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     algorithm.adv_estimator=$rl_alg \
@@ -223,7 +239,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.optim.lr=$lr \
-    actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
+    actor_rollout_ref.actor.optim.lr_warmup_steps=$lr_warmup_steps \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.trust_remote_code=True \
     actor_rollout_ref.actor.checkpoint.save_contents=['model','optimizer','extra','hf_model'] \
@@ -287,7 +303,6 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     critic.ulysses_sequence_parallel_size=$ulysses_sequence_parallel_size \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
     trainer.logger=['console','wandb'] \
-    trainer.project_name=wikiRL \
     trainer.experiment_name=$run_name \
     trainer.val_before_train=False \
     trainer.default_hdfs_dir=null \
@@ -295,11 +310,11 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     trainer.nnodes=$n_nodes \
     +trainer.remove_previous_ckpt_in_save=True \
     trainer.default_local_dir=$checkpoint_path \
-    trainer.save_freq=2 \
+    trainer.save_freq=10 \
     trainer.test_freq=1000 \
     trainer.total_epochs=$epoch \
     +trainer.save_last=True \
-    > "$LOG_DIR/train/${train_log_name}.log" 2>&1
+    > "$TRAIN_LOG_DIR/${train_log_name}.log" 2>&1
 
 train_exit_code=$?
 TRAIN_END_TS="$(date '+%F %T')"
