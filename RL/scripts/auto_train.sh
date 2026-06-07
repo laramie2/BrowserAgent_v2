@@ -83,12 +83,12 @@ case "$TRAIN_ALGO" in
   mt_grpo|grpo|ppo|default)
     TRAIN_SCRIPT="${TRAIN_SCRIPT_OVERRIDE:-$SCRIPT_DIR/train.sh}"
     LOG_ROOT="${LOG_ROOT_OVERRIDE:-$RL_DIR/logs/mt_grpo}"
-    BASE_RAY_TMP_DEFAULT="/DATA/disk0/yjb/yutao/ray_tmp"
+    BASE_RAY_TMP_DEFAULT="/data/yutao/ray_tmp"
     ;;
   dapo)
     TRAIN_SCRIPT="${TRAIN_SCRIPT_OVERRIDE:-$SCRIPT_DIR/train.sh}"
     LOG_ROOT="${LOG_ROOT_OVERRIDE:-$RL_DIR/logs/dapo}"
-    BASE_RAY_TMP_DEFAULT="/tmp/raydapo_grid"
+    BASE_RAY_TMP_DEFAULT="/data/yutao/ray_tmp"
     ;;
   *)
     echo "[CONFIG ERROR] unsupported TRAIN_ALGO='$TRAIN_ALGO'. Use mt_grpo or dapo." >&2

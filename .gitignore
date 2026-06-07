@@ -13,3 +13,14 @@ checkpoints/
 checkpoints*/
 dataset/
 models/
+wiki_cluster/run/
+wiki_cluster/tools/
+RL/outputs/
+RL/wandb/
+RL/remote_wandb/
+RL/tmp/
+RL/filter_results/
+sft/output/
+sft/done
+*.tar.gz
+*.pkl

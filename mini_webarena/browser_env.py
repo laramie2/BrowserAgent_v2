@@ -35,6 +35,30 @@ from .scripts import *
 
 Trajectory = list[Union[StateInfo, Action]]
 
+DISABLE_CHROME_GPU = os.getenv(
+    "MINI_WEB_ARENA_DISABLE_CHROME_GPU", "1"
+).strip().lower() not in {"0", "false", "no", "off"}
+
+CHROMIUM_BASE_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
+CHROMIUM_GPU_DISABLED_ARGS = [
+    "--disable-gpu",
+    "--disable-gpu-compositing",
+    "--disable-software-rasterizer",
+    "--disable-accelerated-2d-canvas",
+    "--disable-accelerated-video-decode",
+    "--disable-webgl",
+    "--disable-webgl2",
+    "--use-gl=disabled",
+]
+
+
+def get_chromium_launch_args() -> list[str]:
+    args = list(CHROMIUM_BASE_ARGS)
+    if DISABLE_CHROME_GPU:
+        args.extend(CHROMIUM_GPU_DISABLED_ARGS)
+    return args
+
+
 @dataclass
 class PlaywrightScript:
     function: str  # goto, get_by_role
@@ -177,7 +201,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         self.playwright = self.context_manager.start()
         self.browser = self.playwright.chromium.launch(
             headless=self.headless, slow_mo=self.slow_mo,
-            args=["--no-sandbox"]
+            args=get_chromium_launch_args()
         )
 
         if config_file:
@@ -410,7 +434,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         """
         super().reset(seed=seed, options=options)
         if self.reset_finished:
-            self.context_manager.__exit__()
+            self._close_browser_runtime()
 
         if options is not None and "config_file" in options:
             config_file = Path(options["config_file"])
@@ -457,7 +481,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         super().reset()
         if self.reset_finished:
             # print("[DEBUG] Exiting previous browser context.")
-            self.context_manager.__exit__()
+            self._close_browser_runtime()
 
         # print("[DEBUG] Initializing Context Manager.")
         self.context_manager = sync_playwright()
@@ -468,7 +492,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         self.browser = self.playwright.chromium.launch(
             headless=self.headless,
             slow_mo=self.slow_mo,
-            args=["--no-sandbox"]
+            args=get_chromium_launch_args()
         )
 
         # print("[DEBUG] Creating new browser context with viewport=", self.viewport_size, ", storage_state=",
@@ -536,8 +560,44 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             self.context.tracing.stop(path=trace_path)
 
     def close(self) -> None:
-        if self.reset_finished:
-            self.context_manager.__exit__()
+        self._close_browser_runtime()
+
+    def _close_browser_runtime(self) -> None:
+        errors = []
+
+        context = getattr(self, "context", None)
+        if context is not None:
+            try:
+                context.close()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                self.context = None
+
+        browser = getattr(self, "browser", None)
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                self.browser = None
+
+        playwright = getattr(self, "playwright", None)
+        if playwright is not None:
+            try:
+                playwright.stop()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                self.playwright = None
+
+        self.context_manager = None
+        self.page = None
+        self.reset_finished = False
+
+        if errors:
+            print(f"[WARN] Browser runtime close had {len(errors)} error(s): {errors[-1]}")
 
     def step(
             self, action: Action

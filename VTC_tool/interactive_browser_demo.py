@@ -38,9 +38,10 @@ def interactive_browser(
     extra_field = {
         "question": "who plays the wildling woman in game of thrones",
         # "url": "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
-        "url": "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
+        # "url": "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
         # "url": "https://www.wikipedia.org/"
         # "url": "https://www.baidu.com"
+        "url": "http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/Jute_cultivation"
     }
 
     current_action = "" # 初始为空，获取首页
@@ -54,7 +55,7 @@ def interactive_browser(
             "extra_fields": [extra_field],
         }
         try:
-            resp = requests.post(url, json=payload, timeout=60)
+            resp = requests.post(url, json=payload, timeout=180)
             resp.raise_for_status()
             data = resp.json()      
 

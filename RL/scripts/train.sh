@@ -4,7 +4,7 @@ set -x
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$RL_DIR/.." && pwd)"
-TRAIN_PRESET="${TRAIN_PRESET:-mt_grpo}"
+TRAIN_PRESET="${TRAIN_PRESET:-ppo_opd}"
 TRAIN_CONFIG="${TRAIN_CONFIG:-$RL_DIR/configs/train.yaml}"
 
 if [ -f "$TRAIN_CONFIG" ]; then
@@ -13,21 +13,35 @@ fi
 
 cd "$RL_DIR"
 
-# =====本机运行配置参数=====
+
+# ====本机运行配置参数=====
 export PYTHONPATH=$PYTHONPATH:$(pwd)/..:$(pwd)/../..:$(pwd)/../verl-tool:$(pwd)/../mini_webarena
 rm -rf ~/.triton/cache
 ln -sf /usr/lib/x86_64-linux-gnu/libcuda.so.1 $CONDA_PREFIX/lib/libcuda.so
-export LIBRARY_PATH=$CONDA_PREFIX/lib:$LIBRARY_PATH
+
+# Prefer the CUDA/cuDNN libraries bundled with the current PyTorch environment.
+# The system cuDNN in /lib can be older and crash vLLM's Qwen2.5-VL profile run.
+PY_SITE_PACKAGES="$CONDA_PREFIX/lib/python3.10/site-packages"
+NVIDIA_LD_LIBRARY_PATH=""
+for lib_path in \
+    "$PY_SITE_PACKAGES/nvidia/cudnn/lib" \
+    "$PY_SITE_PACKAGES/nvidia/cublas/lib" \
+    "$PY_SITE_PACKAGES/nvidia/cuda_runtime/lib" \
+    "$PY_SITE_PACKAGES/nvidia/cuda_nvrtc/lib"; do
+    if [ -d "$lib_path" ]; then
+        NVIDIA_LD_LIBRARY_PATH="${NVIDIA_LD_LIBRARY_PATH:+$NVIDIA_LD_LIBRARY_PATH:}$lib_path"
+    fi
+done
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${NVIDIA_LD_LIBRARY_PATH:+:$NVIDIA_LD_LIBRARY_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LIBRARY_PATH="$CONDA_PREFIX/lib${NVIDIA_LD_LIBRARY_PATH:+:$NVIDIA_LD_LIBRARY_PATH}${LIBRARY_PATH:+:$LIBRARY_PATH}"
 
 export RUN_TAG="${RUN_TAG:-run1}"
-# Ray creates AF_UNIX socket files under RAY_TMPDIR; keep this path short
-# or plasma_store can exceed Linux's 107-byte socket path limit.
-export RAY_TMPDIR="${RAY_TMPDIR_OVERRIDE:-/tmp/ray_${RUN_TAG:0:12}}"
+export RAY_TMPDIR="${RAY_TMPDIR_OVERRIDE:-/data/yutao/ray_tmp/${RUN_TAG}}"
 mkdir -p "$RAY_TMPDIR"
 
 export RAY_PORT="${RAY_PORT_OVERRIDE:-6378}"
 
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
 export WANDB_API_KEY=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
 
 export MASTER_PORT="${MASTER_PORT_OVERRIDE:-29501}"
@@ -163,6 +177,17 @@ clip_ratio_high=${CLIP_RATIO_HIGH_OVERRIDE:-0.3}
 clip_ratio_c=${CLIP_RATIO_C_OVERRIDE:-10.0}
 loss_agg_mode=${LOSS_AGG_MODE_OVERRIDE:-token-mean}
 
+opd_enable=${OPD_ENABLE_OVERRIDE:-False}
+opd_teacher_model=${OPD_TEACHER_MODEL_OVERRIDE:-/data/yutao/lzt/BrowserAgent_v2/RL/models/Qwen2.5-VL-32B-Instruct}
+opd_teacher_cuda_visible_devices=${OPD_TEACHER_CUDA_VISIBLE_DEVICES:-}
+opd_teacher_tp_size=${OPD_TEACHER_TP_SIZE_OVERRIDE:-1}
+opd_teacher_dtype=${OPD_TEACHER_DTYPE_OVERRIDE:-bfloat16}
+opd_teacher_topk=${OPD_TEACHER_TOPK_OVERRIDE:-20}
+opd_teacher_batch_size=${OPD_TEACHER_BATCH_SIZE_OVERRIDE:-1}
+opd_teacher_timeout=${OPD_TEACHER_TIMEOUT_OVERRIDE:-600}
+opd_reason_coef=${OPD_REASON_COEF_OVERRIDE:-0.03}
+opd_teacher_temperature=${OPD_TEACHER_TEMPERATURE_OVERRIDE:-1.0}
+
 lr=${LR_OVERRIDE:-5e-7}
 lr_warmup_steps=${LR_WARMUP_STEPS_OVERRIDE:-10}
 epoch=${EPOCH_OVERRIDE:-8}
@@ -184,6 +209,7 @@ if [ "$reward_enable" != "True" ]; then
     reward_tool_invalid_penalty_weight=0.0
 fi
 ppo_micro_batch_size_per_gpu=1
+ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU_OVERRIDE:-10240}
 log_prob_micro_batch_size_per_gpu=${LOG_PROB_MBS_OVERRIDE:-4}
 tensor_model_parallel_size=1
 gpu_memory_utilization=${GPU_MEMORY_UTILIZATION_OVERRIDE:-0.3}
@@ -228,6 +254,7 @@ text_browser_actor_cpus=${TEXT_BROWSER_ACTOR_CPUS_OVERRIDE:-1}
 pass_extra_fields_to_reward=${PASS_EXTRA_FIELDS_TO_REWARD:-True}
 reward_fn_async=${REWARD_FN_ASYNC:-False}
 compact_tool_interact_info=${COMPACT_TOOL_INTERACT_INFO:-True}
+enable_obs_compression=${ENABLE_OBS_COMPRESSION_OVERRIDE:-True}
 rollout_max_num_seqs=${ROLLOUT_MAX_NUM_SEQS_OVERRIDE:-64}
 rollout_max_num_batched_tokens=${ROLLOUT_MAX_BATCHED_TOKENS_OVERRIDE:-16384}
 
@@ -238,7 +265,7 @@ elif [ "$enable_stratified_sampler" = "True" ]; then
 else
     sampler_mode="default"
 fi
-log_trace "train_config rl_alg=$rl_alg use_kl_loss=$use_kl_loss dapo_filter=$enable_dapo_filter_groups norm_adv_std=$norm_adv_by_std_in_grpo clip=[$clip_ratio_low,$clip_ratio_high,$clip_ratio_c] loss_agg=$loss_agg_mode sampler=$sampler_mode reward_enable=$reward_enable reward_weights=answer:$reward_answer_weight,format:$reward_format_weight,process:$reward_enable_process,action:$reward_action_correctness_weight,hallucinated:$reward_hallucinated_id_penalty_weight,tool_invalid:$reward_tool_invalid_penalty_weight concurrency=agent_workers:$agent_loop_num_workers,max_traj:$max_concurrent_trajectories,tool_requests:$tool_server_max_concurrent_requests compact_tool_info=$compact_tool_interact_info pass_extra_fields=$pass_extra_fields_to_reward"
+log_trace "train_config rl_alg=$rl_alg use_kl_loss=$use_kl_loss dapo_filter=$enable_dapo_filter_groups norm_adv_std=$norm_adv_by_std_in_grpo clip=[$clip_ratio_low,$clip_ratio_high,$clip_ratio_c] loss_agg=$loss_agg_mode sampler=$sampler_mode reward_enable=$reward_enable reward_weights=answer:$reward_answer_weight,format:$reward_format_weight,process:$reward_enable_process,action:$reward_action_correctness_weight,hallucinated:$reward_hallucinated_id_penalty_weight,tool_invalid:$reward_tool_invalid_penalty_weight concurrency=agent_workers:$agent_loop_num_workers,max_traj:$max_concurrent_trajectories,tool_requests:$tool_server_max_concurrent_requests compact_tool_info=$compact_tool_interact_info pass_extra_fields=$pass_extra_fields_to_reward opd_enable=$opd_enable opd_topk=$opd_teacher_topk opd_coef=$opd_reason_coef obs_compression=$enable_obs_compression"
 
 action_stop_tokens_file="$(pwd)$(mktemp)"
 mkdir -p "$(dirname "$action_stop_tokens_file")"
@@ -263,6 +290,59 @@ export TEXT_BROWSER_INIT_RETRIES=1
 host=$(hostname -i | awk '{print $1}')
 port=$(shuf -i 30000-31000 -n 1)
 tool_server_url=http://$host:$port/get_observation
+
+opd_teacher_url=""
+opd_teacher_pid=""
+if [ "$opd_enable" = "True" ]; then
+    if [ -z "$opd_teacher_model" ]; then
+        echo "OPD_ENABLE_OVERRIDE=True requires OPD_TEACHER_MODEL_OVERRIDE" >&2
+        exit 1
+    fi
+    opd_teacher_port=$(shuf -i 32000-33000 -n 1)
+    opd_teacher_url=http://$host:$opd_teacher_port
+    export NO_PROXY="${NO_PROXY:+$NO_PROXY,}localhost,127.0.0.1,$host"
+    export no_proxy="${no_proxy:+$no_proxy,}localhost,127.0.0.1,$host"
+    opd_teacher_log_dir="$LOG_DIR/opd_teacher/$LOG_CONTEXT_DIR"
+    mkdir -p "$opd_teacher_log_dir"
+    opd_teacher_log="$opd_teacher_log_dir/${RUN_LOG_TAG}.log"
+    log_trace "opd_teacher_starting model=$opd_teacher_model url=$opd_teacher_url gpus=${opd_teacher_cuda_visible_devices:-$CUDA_VISIBLE_DEVICES} topk=$opd_teacher_topk"
+    CUDA_VISIBLE_DEVICES="${opd_teacher_cuda_visible_devices:-$CUDA_VISIBLE_DEVICES}" PYTHONUNBUFFERED=1 python3 -m verl_tool.servers.opd_teacher_server \
+        --host "$host" \
+        --port "$opd_teacher_port" \
+        --model "$opd_teacher_model" \
+        --dtype "$opd_teacher_dtype" \
+        --topk "$opd_teacher_topk" \
+        --tensor_parallel_size "$opd_teacher_tp_size" \
+        > "$opd_teacher_log" 2>&1 &
+    opd_teacher_pid=$!
+    opd_teacher_ready=0
+
+    for _ in $(seq 1 120); do
+        if python3 - "$opd_teacher_url/health" <<'HEALTHPY'
+import sys, urllib.request
+try:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(sys.argv[1], timeout=2) as resp:
+        raise SystemExit(0 if resp.status == 200 else 1)
+except Exception:
+    raise SystemExit(1)
+HEALTHPY
+        then
+            opd_teacher_ready=1
+            log_trace "opd_teacher_ready pid=$opd_teacher_pid url=$opd_teacher_url"
+            break
+        fi
+        if ! kill -0 "$opd_teacher_pid" 2>/dev/null; then
+            echo "OPD teacher server exited before becoming ready. See $opd_teacher_log" >&2
+            exit 1
+        fi
+        sleep 2
+    done
+    if [ "$opd_teacher_ready" != "1" ]; then
+        echo "OPD teacher server did not become ready in time. See $opd_teacher_log" >&2
+        exit 1
+    fi
+fi
 
 python -m verl_tool.servers.serve \
     --host "$host" \
@@ -291,6 +371,18 @@ cleanup_server() {
         kill -9 "$server_pid" 2>/dev/null || true
         if [ -n "$child_pids" ]; then
             kill -9 $child_pids 2>/dev/null || true
+        fi
+    fi
+    if [ -n "${opd_teacher_pid:-}" ] && kill -0 "$opd_teacher_pid" 2>/dev/null; then
+        teacher_child_pids=$(pgrep -P "$opd_teacher_pid" 2>/dev/null || true)
+        kill "$opd_teacher_pid" 2>/dev/null || true
+        if [ -n "$teacher_child_pids" ]; then
+            kill $teacher_child_pids 2>/dev/null || true
+        fi
+        sleep 2
+        kill -9 "$opd_teacher_pid" 2>/dev/null || true
+        if [ -n "$teacher_child_pids" ]; then
+            kill -9 $teacher_child_pids 2>/dev/null || true
         fi
     fi
 }
@@ -343,6 +435,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.actor.checkpoint.save_contents=['model','optimizer','extra','hf_model'] \
     actor_rollout_ref.actor.ppo_mini_batch_size=$ppo_mini_batch_size \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=$ppo_micro_batch_size_per_gpu \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=$ppo_max_token_len_per_gpu \
     actor_rollout_ref.actor.use_dynamic_bsz=$use_dynamic_bsz \
     actor_rollout_ref.actor.use_kl_loss=$use_kl_loss \
     actor_rollout_ref.actor.strategy=$strategy \
@@ -357,6 +450,13 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.actor.clip_ratio_low=$clip_ratio_low \
     actor_rollout_ref.actor.clip_ratio_c=$clip_ratio_c \
     actor_rollout_ref.actor.loss_agg_mode=$loss_agg_mode \
+    +actor_rollout_ref.actor.opd_enable=$opd_enable \
+    +actor_rollout_ref.actor.opd_reason_coef=$opd_reason_coef \
+    +actor_rollout_ref.actor.opd_teacher_url="$opd_teacher_url" \
+    +actor_rollout_ref.actor.opd_teacher_topk=$opd_teacher_topk \
+    +actor_rollout_ref.actor.opd_teacher_batch_size=$opd_teacher_batch_size \
+    +actor_rollout_ref.actor.opd_teacher_timeout=$opd_teacher_timeout \
+    +actor_rollout_ref.actor.opd_teacher_temperature=$opd_teacher_temperature \
     actor_rollout_ref.agent.enable_agent=$enable_agent \
     actor_rollout_ref.agent.tool_server_url=$tool_server_url \
     actor_rollout_ref.agent.max_prompt_length=$max_prompt_length \
@@ -367,6 +467,8 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     actor_rollout_ref.agent.additional_eos_token_ids=$additional_eos_token_ids \
     actor_rollout_ref.agent.mask_observations=$mask_observations \
     actor_rollout_ref.agent.mask_overlong_loss=$mask_overlong_loss \
+    +actor_rollout_ref.agent.opd_enable=$opd_enable \
+    +actor_rollout_ref.agent.enable_obs_compression=$enable_obs_compression \
     actor_rollout_ref.agent.action_stop_tokens=$action_stop_tokens_file \
     +actor_rollout_ref.agent.action_extract_tokens=$action_extract_tokens_file \
     actor_rollout_ref.agent.tool_call_timeout=300 \

@@ -297,7 +297,7 @@ def analyze_trajectory_errors(file_path):
     print()
 
 if __name__ == "__main__":
-    TEST_FILE_DIR = "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_seq/results-rl/Qwen2.5-VL-7B-Instruct_task-opsrc-new_add2400-sft-5e-5lr-freeze_false-2epoch-64b-1000rl" 
+    TEST_FILE_DIR = "/data/yutao/lzt/BrowserAgent_v2/gen_seq/results/Qwen2.5-VL-7B-Instruct_task-opsrc-12619-sft-5e-5lr-freeze_false-2epoch-n10_b64_lr5e-7_t0.8_e32_kl0.01_warmup10_turns10-new-dapo" 
 
     NQ_FILE_PATH = f"{TEST_FILE_DIR}/nq_test_results.jsonl"
     HOTPOT_FILE_PATH = f"{TEST_FILE_DIR}/hotpot_test_results.jsonl"
