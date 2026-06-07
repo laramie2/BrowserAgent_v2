@@ -343,58 +343,58 @@ if __name__ == "__main__":
 
 """
 python extract_rl.py \
-  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/train-00000-of-00001.parquet" \
-  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/nq/" \
-  --num_samples 1000 \
-  --output_prefix "train_1000_labelled" \
+  --parquet_path "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/train-00000-of-00001.parquet" \
+  --output_dir "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/nq/" \
+  --num_samples 5000 \
+  --output_prefix "train_5000_labelled" \
   --use_exclude \
-  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/obj.json" \
+  --exclude_json "/data/yutao/lzt/BrowserAgent_v2/RL/obj.json" \
   --seed 42
 
 python extract_rl.py \
-  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/train-00000-of-00001.parquet" \
-  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/hotpot/" \
-  --num_samples 1000 \
-  --output_prefix "train_1000_labelled" \
+  --parquet_path "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/train-00000-of-00001.parquet" \
+  --output_dir "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/hotpot/" \
+  --num_samples 5000 \
+  --output_prefix "train_5000_labelled" \
   --use_exclude \
-  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/obj.json" \
+  --exclude_json "/data/yutao/lzt/BrowserAgent_v2/RL/obj.json" \
   --seed 42
 
 python extract_rl.py \
-  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/test-00000-of-00001.parquet" \
-  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/nq/" \
+  --parquet_path "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/test-00000-of-00001.parquet" \
+  --output_dir "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/nq/" \
   --num_samples 10 \
   --output_prefix "test_10" \
   --seed 42
 
 python extract_rl.py \
-  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/validation-00000-of-00001.parquet" \
-  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/hotpot/" \
+  --parquet_path "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/validation-00000-of-00001.parquet" \
+  --output_dir "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/hotpot/" \
   --num_samples 10 \
   --output_prefix "test_10" \
   --seed 42
 
 python extract_rl.py \
-  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/train-00000-of-00001.parquet" \
-  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/sft_extract/" \
+  --parquet_path "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/train-00000-of-00001.parquet" \
+  --output_dir "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/sft_extract/" \
   --num_samples 10000 \
   --output_prefix "sft-nq-10000" \
   --use_exclude \
-  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v1/obj_sum.json" \
+  --exclude_json "/data/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v1/obj_sum.json" \
   --seed 42
 
 python extract_rl.py \
-  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/train-00000-of-00001.parquet" \
-  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/sft_extract/" \
+  --parquet_path "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/hotpot/train-00000-of-00001.parquet" \
+  --output_dir "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/sft_extract/" \
   --num_samples 10000 \
   --output_prefix "sft-hotpot-10000" \
   --use_exclude \
-  --exclude_json "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v1/obj_sum.json" \
+  --exclude_json "/data/yutao/lzt/BrowserAgent_v2/gen_data/sft_seed/v1/obj_sum.json" \
   --seed 42
 
 python extract_rl.py \
-  --parquet_path "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/test-00000-of-00001.parquet" \
-  --output_dir "/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/RL/dataset/nq" \
+  --parquet_path "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/BrowserAgent-SeedData/nq/test-00000-of-00001.parquet" \
+  --output_dir "/data/yutao/lzt/BrowserAgent_v2/RL/dataset/nq" \
   --num_samples 10 \
   --output_prefix "test_10"
 """

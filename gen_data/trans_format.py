@@ -279,13 +279,13 @@ python trans_format.py \
 
 """
 python trans_format.py \
-  --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-without_content-newadd2720/data.jsonl \
-  --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-without_content-newadd2720/data_1.jsonl \
-  --mode remove_click_content \
-  --prompt_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_without_content.txt
+  --input /data/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc_14194.jsonl \
+  --output /data/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc_14194_1.jsonl \
+  --mode bracket_to_angle \
+  --prompt_file /data/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_enhance_yt.txt
 
 python trans_format.py \
-  --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-new_add2720/data.jsonl \
-  --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/dataset/task-opsrc-new_add2720/data_1.jsonl \
-  --prompt_file /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info.txt
+  --input /data/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc_12619.jsonl \
+  --output /data/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc_12619_1.jsonl \
+  --prompt_file /data/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info.txt
 """

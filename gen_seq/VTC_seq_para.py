@@ -57,7 +57,8 @@ def generate_image_for_observation(ob_text: str, output_dir: str, is_simple: boo
     # 如果图片已存在，直接返回路径（大幅节省渲染时间）
     if not os.path.exists(img_path):
         os.makedirs(output_dir, exist_ok=True)
-        if not is_simple:
+        # if not is_simple:
+        if True:
             img, char_count = _local_vtc.render_text_to_image(
                 ob_text, 
                 use_compact_mode=True, 
@@ -295,12 +296,12 @@ python -m gen_seq.VTC_seq_para \
     --is_simple False
 
 python -m gen_seq.VTC_seq_para \
-    --input /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft.jsonl \
-    --output /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-simplified-2.jsonl \
-    --img_dir /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc-simplified-2_images \
+    --input /data/yutao/lzt/BrowserAgent_v2/data/v2/sft-5677.jsonl \
+    --output /data/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc_5677.jsonl \
+    --img_dir /data/yutao/lzt/BrowserAgent_v2/data/v2/sft_task-opsrc_5677_images \
     --level task \
     --format opensource \
-    --system_msg_path /DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info_enhance.txt \
+    --system_msg_path /data/yutao/lzt/BrowserAgent_v2/prompt/system_prompt_with_history_info.txt \
     --is_simple True
 
 python -m gen_seq.VTC_seq_para \

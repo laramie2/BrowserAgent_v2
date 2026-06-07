@@ -4,15 +4,15 @@
 # ==========================================
 # 1. 基础路径配置区
 # ==========================================
-SFT_ROOT="/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft"
+SFT_ROOT="/data/yutao/lzt/BrowserAgent_v2/sft"
 MODEL_NAME="Qwen2.5-VL-7B-Instruct"
-DATASET_NAME="task-opsrc-without_content-newadd2720-sft-5e-5lr-freeze_false"
+DATASET_NAME="task-opsrc_12619-sft-5e-5lr-freeze_false"
 EPOCH=2
 # 原始模型路径
-MODEL_PATH="/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/models/${MODEL_NAME}"
+MODEL_PATH="/data/yutao/lzt/BrowserAgent_v2/models/${MODEL_NAME}"
 
 # 【重要：请替换为训练完成后生成的具体时间戳目录名和 checkpoint 步数】
-CHECKPOINT_SUBDIR="v3-20260424-200127/checkpoint-510"
+CHECKPOINT_SUBDIR="v0-20260503-074057/checkpoint-788"
 # ==========================================
 # 2. 导出路径配置区
 # ==========================================

@@ -28,7 +28,7 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/1:/data:ro
+      - /data/yutao/lzt/webarena/webarena_zim/1:/data:ro
     restart: always
 
   wikipedia-2:
@@ -41,7 +41,7 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/2:/data:ro
+      - /data/yutao/lzt/webarena/webarena_zim/1:/data:ro
     restart: always
 
   wikipedia-3:
@@ -54,7 +54,7 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/3:/data:ro
+      - /data/yutao/lzt/webarena/webarena_zim/2:/data:ro
     restart: always
 
   wikipedia-4:
@@ -67,7 +67,7 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/4:/data:ro
+      - /data/yutao/lzt/webarena/webarena_zim/2:/data:ro
     restart: always
 
   wikipedia-5:
@@ -80,7 +80,7 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/1:/data:ro
+      - /data/yutao/lzt/webarena/webarena_zim/3:/data:ro
     restart: always
 
   wikipedia-6:
@@ -93,7 +93,7 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/2:/data:ro
+      - /data/yutao/lzt/webarena/webarena_zim/3:/data:ro
     restart: always
 
   wikipedia-7:
@@ -106,7 +106,7 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/3:/data:ro
+      - /data/yutao/lzt/webarena/webarena_zim/4:/data:ro
     restart: always
 
   wikipedia-8:
@@ -119,5 +119,5 @@ services:
     security_opt:
       - seccomp=unconfined
     volumes:
-      - /DATA/disk0/yjb/yutao/lzt/webarena/webarena_zim/4:/data:ro
+      - /data/yutao/lzt/webarena/webarena_zim/4:/data:ro
     restart: always

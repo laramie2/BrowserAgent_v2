@@ -1,7 +1,7 @@
 #!/bin/bash
 # run_vllm_instance1.sh
 
-INSTANCE_ID="instance_task-opsrc-without_content-newadd2720-sft-5e-5lr-freeze_false-2epoch"
+INSTANCE_ID="instance_task-opsrc_12619-sft-5e-5lr-freeze_false-2epoch"
 PORT=8008
 LOG_FILE="./logs/vllm_${INSTANCE_ID}.log"
 
@@ -14,7 +14,7 @@ mkdir -p ./logs
 
 # export LIBRARY_PATH=$CONDA_PREFIX/lib:$LIBRARY_PATH
 
-MODEL_PATH=/DATA/disk0/yjb/yutao/lzt/BrowserAgent_v2/sft/output/Qwen2.5-VL-7B-Instruct-task-opsrc-without_content-newadd2720-sft-5e-5lr-freeze_false-2epoch-merged
+MODEL_PATH=/data/yutao/lzt/BrowserAgent_v2/RL/models/Qwen2.5-VL-7B-Instruct-task-opsrc_12619-sft-5e-5lr-freeze_false-2epoch-merged
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 python -m vllm.entrypoints.openai.api_server \
@@ -26,6 +26,7 @@ python -m vllm.entrypoints.openai.api_server \
     --max-model-len 16384 \
     --tensor-parallel-size 4 \
     > $LOG_FILE 2>&1
+#    --gpu-memory-utilization 0.7 \
 
 # 退出时清理
 pkill -9 -f "VLLM.*--port $PORT" 2>/dev/null
