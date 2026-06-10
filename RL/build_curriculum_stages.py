@@ -10,19 +10,16 @@ Two sampling modes are supported:
   - disjoint: a source row can appear in at most one stage.
   - random: stages are sampled independently, so rows may repeat across stages.
 
-stage_1_medium_warmup: trivial 50,  easy 250, medium 600, hard 100
-stage_2_medium_hard:   trivial 50,  easy 200, medium 550, hard 200
-stage_3_hard_boost:    trivial 50,  easy 150, medium 500, hard 300
-stage_4_mixed_final:   trivial 100, easy 250, medium 450, hard 200
+Default stages use the fine-grained k=8 pass-count buckets emitted by
+RL/data_filter.py:
 
-stage_1_medium_warmup:
-trivial 50, easy 250, medium 600, hard 100
-stage_2_medium_hard:
-trivial 50, easy 200, medium 550, hard 200
-stage_3_hard_boost:
-trivial 50, easy 150, medium 500, hard 300
-stage_4_mixed_final:
-trivial 100, easy 250, medium 450, hard 200
+trivial:      pass_count = 8/8
+easy_high:    pass_count = 6-7/8
+medium_high:  pass_count = 5/8
+medium_mid:   pass_count = 3-4/8
+medium_low:   pass_count = 2/8
+hard:         pass_count = 1/8 or mean_reward > 0.05
+unsolved:     pass_count = 0/8 and mean_reward <= 0.05
 
 """
 
@@ -53,21 +50,50 @@ DEFAULT_SOURCE_PARQUETS = {
 STAGE_DEFS = [
     {
         "name": "stage_1_medium_warmup",
-        "ratios": {"trivial": 0.05, "easy": 0.25, "medium": 0.60, "hard": 0.10},
+        "ratios": {
+            "trivial": 0.05,
+            "easy_high": 0.17,
+            "medium_high": 0.23,
+            "medium_mid": 0.37,
+            "medium_low": 0.13,
+            "hard": 0.05,
+        },
     },
     {
-        "name": "stage_2_medium_hard",
-        "ratios": {"trivial": 0.05, "easy": 0.20, "medium": 0.55, "hard": 0.20},
+        "name": "stage_2_core_medium",
+        "ratios": {
+            "trivial": 0.03,
+            "easy_high": 0.12,
+            "medium_high": 0.25,
+            "medium_mid": 0.42,
+            "medium_low": 0.13,
+            "hard": 0.05,
+        },
     },
     {
-        "name": "stage_3_hard_boost",
-        "ratios": {"trivial": 0.05, "easy": 0.15, "medium": 0.50, "hard": 0.30},
+        "name": "stage_3_medium_low_hard",
+        "ratios": {
+            "trivial": 0.03,
+            "easy_high": 0.08,
+            "medium_high": 0.17,
+            "medium_mid": 0.39,
+            "medium_low": 0.23,
+            "hard": 0.10,
+        },
     },
     {
         "name": "stage_4_mixed_final",
-        "ratios": {"trivial": 0.10, "easy": 0.25, "medium": 0.45, "hard": 0.20},
+        "ratios": {
+            "trivial": 0.05,
+            "easy_high": 0.17,
+            "medium_high": 0.22,
+            "medium_mid": 0.37,
+            "medium_low": 0.13,
+            "hard": 0.06,
+        },
     },
 ]
+
 
 
 class NumpyJSONEncoder(json.JSONEncoder):

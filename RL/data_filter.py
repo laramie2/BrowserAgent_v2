@@ -626,14 +626,29 @@ def completed_trials(rollout_file: Path) -> set[Tuple[str, int]]:
     return done
 
 
-def classify_difficulty(solve_rate: float, mean_reward: float) -> str:
-    if solve_rate >= 1.0:
+DIFFICULTY_BUCKETS = [
+    "trivial",
+    "easy_high",
+    "medium_high",
+    "medium_mid",
+    "medium_low",
+    "hard",
+    "unsolved",
+]
+
+
+def classify_difficulty(success_count: int, mean_reward: float) -> str:
+    if success_count >= 8:
         return "trivial"
-    if solve_rate >= 0.75:
-        return "easy"
-    if solve_rate >= 0.25:
-        return "medium"
-    if solve_rate > 0.0 or mean_reward > 0.05:
+    if 6 <= success_count <= 7:
+        return "easy_high"
+    if success_count == 5:
+        return "medium_high"
+    if 3 <= success_count <= 4:
+        return "medium_mid"
+    if success_count == 2:
+        return "medium_low"
+    if success_count == 1 or mean_reward > 0.05:
         return "hard"
     return "unsolved"
 
@@ -655,6 +670,7 @@ def aggregate_rollouts(samples: Sequence[Sample], rollout_file: Path, k: int) ->
         successes = [bool(x.get("success", False)) for x in trials]
         solve_rate = float(sum(successes) / len(successes)) if successes else 0.0
         mean_reward = float(np.mean(rewards)) if rewards else 0.0
+        success_count = int(sum(successes))
         summary = {
             "uid": uid,
             "source_name": sample.source_name,
@@ -671,8 +687,8 @@ def aggregate_rollouts(samples: Sequence[Sample], rollout_file: Path, k: int) ->
             "mean_answer_score": float(np.mean(answer_scores)) if answer_scores else 0.0,
             "mean_format_score": float(np.mean(format_scores)) if format_scores else 0.0,
             "solve_rate": solve_rate,
-            "success_count": int(sum(successes)),
-            "difficulty": classify_difficulty(solve_rate, mean_reward),
+            "success_count": success_count,
+            "difficulty": classify_difficulty(success_count, mean_reward),
             "trial_rewards": rewards,
             "trial_successes": successes,
         }
@@ -700,13 +716,7 @@ def augment_row_for_curriculum(sample: Sample, summary: Dict[str, Any]) -> Dict[
 def export_curriculum(samples: Sequence[Sample], summary_by_uid: Dict[str, Dict[str, Any]], output_dir: Path) -> None:
     curriculum_dir = output_dir / "curriculum"
     curriculum_dir.mkdir(parents=True, exist_ok=True)
-    rows_by_difficulty: Dict[str, List[Dict[str, Any]]] = {
-        "trivial": [],
-        "easy": [],
-        "medium": [],
-        "hard": [],
-        "unsolved": [],
-    }
+    rows_by_difficulty: Dict[str, List[Dict[str, Any]]] = {bucket: [] for bucket in DIFFICULTY_BUCKETS}
     all_rows: List[Dict[str, Any]] = []
 
     for sample in samples:
@@ -729,10 +739,11 @@ def export_curriculum(samples: Sequence[Sample], summary_by_uid: Dict[str, Dict[
         manifest[difficulty] = len(rows)
 
     stage_defs = {
-        "stage_1_easy.parquet": ["easy"],
-        "stage_2_easy_medium.parquet": ["easy", "medium"],
-        "stage_3_medium_hard.parquet": ["medium", "hard"],
-        "stage_4_all_trainable.parquet": ["easy", "medium", "hard"],
+        "stage_1_easy_high.parquet": ["easy_high"],
+        "stage_2_easy_medium_high.parquet": ["easy_high", "medium_high"],
+        "stage_3_core_medium.parquet": ["medium_high", "medium_mid"],
+        "stage_4_medium_hard.parquet": ["medium_mid", "medium_low", "hard"],
+        "stage_5_all_trainable.parquet": ["easy_high", "medium_high", "medium_mid", "medium_low", "hard"],
     }
     for filename, difficulties in stage_defs.items():
         stage_rows: List[Dict[str, Any]] = []
@@ -806,6 +817,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compact_render", action="store_true", help="Use VTC compact text render instead of simple render.")
     parser.add_argument("--save_images", action="store_true", help="Save compressed observation images used by rollouts.")
     parser.add_argument("--no_resume", action="store_true", help="Do not skip completed uid/trial pairs in rollouts.jsonl.")
+    parser.add_argument(
+        "--aggregate_only",
+        action="store_true",
+        help="Reuse output_dir/rollouts.jsonl and only rebuild sample_scores plus curriculum buckets.",
+    )
     return parser.parse_args()
 
 
@@ -822,70 +838,76 @@ def main() -> None:
     if not samples:
         raise ValueError("No samples loaded from --data_paths.")
 
-    system_prompt = read_system_prompt(args.system_prompt, samples)
-    env = BrowserEnvClient(args.env_url, timeout=args.env_timeout)
-    llm = VLMClient(
-        base_url=args.base_url,
-        api_key=args.api_key,
-        model=args.model,
-        timeout=args.llm_timeout,
-        max_tokens=args.max_tokens,
-        temperature=args.temperature,
-        top_p=args.top_p,
-    )
-    reward = RewardComputer(backend=args.reward_backend)
-    runner = RolloutRunner(
-        env=env,
-        llm=llm,
-        reward=reward,
-        system_prompt=system_prompt,
-        image_output_dir=output_dir / "obs_images",
-        max_steps=args.max_steps,
-        compression_factor=args.compression_factor,
-        render_width=args.render_width,
-        render_aspect_ratio=args.render_aspect_ratio,
-        use_simple_render=not args.compact_render,
-        save_images=args.save_images,
-    )
+    if args.aggregate_only:
+        if not rollout_file.exists():
+            raise FileNotFoundError(f"--aggregate_only requires an existing rollout log: {rollout_file}")
+        print(f"Loaded {len(samples)} samples from {len(args.data_paths)} parquet files.")
+        print(f"Aggregate-only mode: reusing rollout log without running new rollouts: {rollout_file}")
+    else:
+        system_prompt = read_system_prompt(args.system_prompt, samples)
+        env = BrowserEnvClient(args.env_url, timeout=args.env_timeout)
+        llm = VLMClient(
+            base_url=args.base_url,
+            api_key=args.api_key,
+            model=args.model,
+            timeout=args.llm_timeout,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+            top_p=args.top_p,
+        )
+        reward = RewardComputer(backend=args.reward_backend)
+        runner = RolloutRunner(
+            env=env,
+            llm=llm,
+            reward=reward,
+            system_prompt=system_prompt,
+            image_output_dir=output_dir / "obs_images",
+            max_steps=args.max_steps,
+            compression_factor=args.compression_factor,
+            render_width=args.render_width,
+            render_aspect_ratio=args.render_aspect_ratio,
+            use_simple_render=not args.compact_render,
+            save_images=args.save_images,
+        )
 
-    done = set() if args.no_resume else completed_trials(rollout_file)
-    jobs = [(sample, trial_idx) for sample in samples for trial_idx in range(1, args.k + 1) if (sample.uid, trial_idx) not in done]
-    writer = JSONLWriter(rollout_file)
+        done = set() if args.no_resume else completed_trials(rollout_file)
+        jobs = [(sample, trial_idx) for sample in samples for trial_idx in range(1, args.k + 1) if (sample.uid, trial_idx) not in done]
+        writer = JSONLWriter(rollout_file)
 
-    print(
-        f"Loaded {len(samples)} samples from {len(args.data_paths)} parquet files. "
-        f"Target rollouts={len(samples) * args.k}, pending={len(jobs)}, workers={args.num_workers}."
-    )
-    print(f"Rollout log: {rollout_file}")
+        print(
+            f"Loaded {len(samples)} samples from {len(args.data_paths)} parquet files. "
+            f"Target rollouts={len(samples) * args.k}, pending={len(jobs)}, workers={args.num_workers}."
+        )
+        print(f"Rollout log: {rollout_file}")
 
-    completed = 0
-    started_at = time.time()
-    if jobs:
-        with ThreadPoolExecutor(max_workers=args.num_workers) as executor:
-            future_to_job = {
-                executor.submit(runner.run, sample, trial_idx): (sample.uid, trial_idx)
-                for sample, trial_idx in jobs
-            }
-            for future in as_completed(future_to_job):
-                uid, trial_idx = future_to_job[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    result = {
-                        "uid": uid,
-                        "trial_idx": trial_idx,
-                        "status": "error",
-                        "error": repr(exc),
-                        "reward": 0.0,
-                        "answer_score": 0.0,
-                        "format_score": 0.0,
-                        "success": False,
-                    }
-                writer.append(result)
-                completed += 1
-                if completed % max(1, min(50, args.num_workers)) == 0 or completed == len(jobs):
-                    elapsed = time.time() - started_at
-                    print(f"Finished {completed}/{len(jobs)} pending rollouts, elapsed={elapsed/60:.1f} min")
+        completed = 0
+        started_at = time.time()
+        if jobs:
+            with ThreadPoolExecutor(max_workers=args.num_workers) as executor:
+                future_to_job = {
+                    executor.submit(runner.run, sample, trial_idx): (sample.uid, trial_idx)
+                    for sample, trial_idx in jobs
+                }
+                for future in as_completed(future_to_job):
+                    uid, trial_idx = future_to_job[future]
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = {
+                            "uid": uid,
+                            "trial_idx": trial_idx,
+                            "status": "error",
+                            "error": repr(exc),
+                            "reward": 0.0,
+                            "answer_score": 0.0,
+                            "format_score": 0.0,
+                            "success": False,
+                        }
+                    writer.append(result)
+                    completed += 1
+                    if completed % max(1, min(50, args.num_workers)) == 0 or completed == len(jobs):
+                        elapsed = time.time() - started_at
+                        print(f"Finished {completed}/{len(jobs)} pending rollouts, elapsed={elapsed/60:.1f} min")
 
     summary_df, summary_by_uid = aggregate_rollouts(samples, rollout_file, args.k)
     summary_df.to_json(summary_jsonl, orient="records", lines=True, force_ascii=False)
@@ -918,4 +940,16 @@ python RL/data_filter.py \
   --num_workers 16 \
   --temperature 0.5 \
   --compression_factor 2.0
+
+python RL/data_filter.py \
+  --data_paths RL/dataset/nq/train_5000_labelled.parquet \
+  --output_dir RL/filter_results/sft_rollout_k8_nq \
+  --k 8 \
+  --aggregate_only
+
+python RL/data_filter.py \
+  --data_paths RL/dataset/hotpot/train_5000_labelled.parquet \
+  --output_dir RL/filter_results/sft_rollout_k8_hotpot \
+  --k 8 \
+  --aggregate_only
 """

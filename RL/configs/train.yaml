@@ -2,7 +2,7 @@ common:
   env:
     SFT_MODEL_NAME_OVERRIDE: task-opsrc_12619-sft-5e-5lr-freeze_false-2epoch
     # BENCHMARK_OVERRIDE: train_hotpot500_nq500
-    BENCHMARK_OVERRIDE: stage_1_medium_warmup
+    BENCHMARK_OVERRIDE: stage_1_medium_warmup_fine
     VAL_DATASET_NAME_OVERRIDE: test_20
     MASTER_PORT_OVERRIDE: 29501
     CUDA_VISIBLE_DEVICES: 0,1,2,3
