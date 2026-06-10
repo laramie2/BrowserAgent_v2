@@ -4,7 +4,7 @@ set -x
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$RL_DIR/.." && pwd)"
-TRAIN_PRESET="${TRAIN_PRESET:-ppo_opd}"
+TRAIN_PRESET="${TRAIN_PRESET:-mt_grpo}"
 TRAIN_CONFIG="${TRAIN_CONFIG:-$RL_DIR/configs/train.yaml}"
 
 if [ -f "$TRAIN_CONFIG" ]; then
@@ -516,7 +516,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     +trainer.remove_previous_ckpt_in_save=True \
     trainer.default_local_dir=$checkpoint_path \
     trainer.save_freq=10 \
-    trainer.test_freq=1000 \
+    trainer.test_freq=5 \
     trainer.total_epochs=$epoch \
     +trainer.save_last=True \
     > "$TRAIN_LOG_DIR/${train_log_name}.log" 2>&1
