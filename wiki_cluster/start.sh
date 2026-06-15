@@ -20,6 +20,10 @@ LB_HOST="${LB_HOST:-0.0.0.0}"
 LB_PORT="${LB_PORT:-22015}"
 STATE_DIR="${STATE_DIR:-$SCRIPT_DIR/run}"
 LOG_DIR="$STATE_DIR/logs"
+BACKEND_STATE_FILE="$STATE_DIR/backends.tsv"
+WATCHDOG_INTERVAL="${WATCHDOG_INTERVAL:-15}"
+WATCHDOG_HEALTH_TIMEOUT="${WATCHDOG_HEALTH_TIMEOUT:-12}"
+WATCHDOG_MAX_FAILURES="${WATCHDOG_MAX_FAILURES:-3}"
 
 zim_paths=()
 if [[ -n "${ZIM_PATHS:-}" ]]; then
@@ -61,6 +65,7 @@ mkdir -p "$LOG_DIR"
 
 echo "[1/4] Stop existing native wiki cluster if present..."
 "$SCRIPT_DIR/stop.sh" >/dev/null 2>&1 || true
+: >"$BACKEND_STATE_FILE"
 
 total_workers=$((${#zim_paths[@]} * WORKERS_PER_ZIM))
 echo "[2/4] Start $total_workers kiwix-serve backends from ${#zim_paths[@]} ZIM copies..."
@@ -75,6 +80,7 @@ for zim_index in "${!zim_paths[@]}"; do
         setsid "$KIWIX_SERVE_BIN" --port="$port" "$zim_path" >"$log_file" 2>&1 &
         pid=$!
         echo "$pid" >"$STATE_DIR/${name}.pid"
+        printf '%s\t%s\t%s\t%s\n' "$name" "$port" "$zim_path" "$log_file" >>"$BACKEND_STATE_FILE"
         backend_ports+=("$port")
         echo "  $name pid=$pid port=$port zim_copy=$((zim_index + 1)) log=$log_file"
         worker_index=$((worker_index + 1))
@@ -92,7 +98,19 @@ setsid python3 "$SCRIPT_DIR/wiki_lb.py" \
     >"$LOG_DIR/wiki-lb.log" 2>&1 &
 echo "$!" >"$STATE_DIR/wiki-lb.pid"
 
-echo "[4/4] Probe services..."
+echo "[4/4] Start watchdog and probe services..."
+: >"$LOG_DIR/wiki-watchdog.log"
+setsid env \
+    STATE_DIR="$STATE_DIR" \
+    KIWIX_SERVE_BIN="$KIWIX_SERVE_BIN" \
+    BACKEND_STATE_FILE="$BACKEND_STATE_FILE" \
+    WATCHDOG_INTERVAL="$WATCHDOG_INTERVAL" \
+    WATCHDOG_HEALTH_TIMEOUT="$WATCHDOG_HEALTH_TIMEOUT" \
+    WATCHDOG_MAX_FAILURES="$WATCHDOG_MAX_FAILURES" \
+    bash "$SCRIPT_DIR/wiki_watchdog.sh" \
+    >/dev/null 2>&1 &
+echo "$!" >"$STATE_DIR/wiki-watchdog.pid"
+
 sleep 2
 "$SCRIPT_DIR/check.sh"
 

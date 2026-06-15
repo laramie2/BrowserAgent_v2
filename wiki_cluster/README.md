@@ -39,6 +39,9 @@ PORT_START=22115
 LB_PORT=22015
 LB_HOST=0.0.0.0
 STATE_DIR=/tmp/wiki_cluster_run
+WATCHDOG_INTERVAL=15
+WATCHDOG_HEALTH_TIMEOUT=12
+WATCHDOG_MAX_FAILURES=3
 ```
 
 ## Check and Stop
@@ -49,6 +52,9 @@ STATE_DIR=/tmp/wiki_cluster_run
 ```
 
 Logs and pid files are written under `wiki_cluster/run/`.
+
+`start.sh` also launches `wiki_watchdog.sh`, which restarts an individual
+`kiwix-serve` backend when its pid exits or its health check fails repeatedly.
 
 `docker-compose.yml` is kept as the old Docker-based launcher for machines that
 can run Docker directly.

@@ -17,6 +17,19 @@ if (( ${#pid_files[@]} == 0 )); then
     exit 0
 fi
 
+watchdog_pid_file="$STATE_DIR/wiki-watchdog.pid"
+if [[ -f "$watchdog_pid_file" ]]; then
+    watchdog_pid="$(cat "$watchdog_pid_file" 2>/dev/null || true)"
+    if [[ -n "$watchdog_pid" ]] && kill -0 "$watchdog_pid" >/dev/null 2>&1; then
+        cmdline="$(ps -p "$watchdog_pid" -o args= 2>/dev/null || true)"
+        if [[ "$cmdline" == *"wiki_watchdog.sh"* ]]; then
+            echo "Stopping wiki-watchdog pid=$watchdog_pid"
+            kill "$watchdog_pid" >/dev/null 2>&1 || true
+        fi
+    fi
+    sleep 1
+fi
+
 for pid_file in "${pid_files[@]}"; do
     name="$(basename "$pid_file" .pid)"
     pid="$(cat "$pid_file" 2>/dev/null || true)"
@@ -27,7 +40,7 @@ for pid_file in "${pid_files[@]}"; do
 
     if kill -0 "$pid" >/dev/null 2>&1; then
         cmdline="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-        if [[ "$cmdline" == *"kiwix-serve"* || "$cmdline" == *"wiki_lb.py"* ]]; then
+        if [[ "$cmdline" == *"kiwix-serve"* || "$cmdline" == *"wiki_lb.py"* || "$cmdline" == *"wiki_watchdog.sh"* ]]; then
             echo "Stopping $name pid=$pid"
             kill "$pid" >/dev/null 2>&1 || true
         else
@@ -44,7 +57,7 @@ for pid_file in "${pid_files[@]}"; do
     pid="$(cat "$pid_file" 2>/dev/null || true)"
     if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
         cmdline="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-        if [[ "$cmdline" == *"kiwix-serve"* || "$cmdline" == *"wiki_lb.py"* ]]; then
+        if [[ "$cmdline" == *"kiwix-serve"* || "$cmdline" == *"wiki_lb.py"* || "$cmdline" == *"wiki_watchdog.sh"* ]]; then
             echo "Force stopping pid=$pid"
             kill -9 "$pid" >/dev/null 2>&1 || true
         fi
