@@ -195,11 +195,18 @@ epoch=${EPOCH_OVERRIDE:-8}
 reward_manager=BrowserAgent
 reward_enable=${REWARD_ENABLE_OVERRIDE:-True}
 reward_answer_weight=${REWARD_ANSWER_WEIGHT_OVERRIDE:-0.9}
-reward_format_weight=${REWARD_FORMAT_WEIGHT_OVERRIDE:-0.1}
+reward_format_weight=${REWARD_FORMAT_WEIGHT_OVERRIDE:-0.05}
 reward_enable_process=${REWARD_ENABLE_PROCESS_OVERRIDE:-True}
-reward_action_correctness_weight=${REWARD_ACTION_CORRECTNESS_WEIGHT_OVERRIDE:-0.1}
+reward_action_correctness_weight=${REWARD_ACTION_CORRECTNESS_WEIGHT_OVERRIDE:-0.0}
 reward_hallucinated_id_penalty_weight=${REWARD_HALLUCINATED_ID_PENALTY_WEIGHT_OVERRIDE:-0.0}
 reward_tool_invalid_penalty_weight=${REWARD_TOOL_INVALID_PENALTY_WEIGHT_OVERRIDE:-0.0}
+reward_process_penalty_weight=${REWARD_PROCESS_PENALTY_WEIGHT_OVERRIDE:-0.05}
+reward_retrieval_weight=${REWARD_RETRIEVAL_WEIGHT_OVERRIDE:-0.20}
+reward_refinement_weight=${REWARD_REFINEMENT_WEIGHT_OVERRIDE:-0.10}
+reward_query_weight=${REWARD_QUERY_WEIGHT_OVERRIDE:-0.05}
+reward_action_penalty_turn_weight=${REWARD_ACTION_PENALTY_TURN_WEIGHT_OVERRIDE:-0.05}
+reward_retrieval_decay=${REWARD_RETRIEVAL_DECAY_OVERRIDE:-0.05}
+turn_advantage_coef=${TURN_ADVANTAGE_COEF_OVERRIDE:-0.3}
 if [ "$reward_enable" != "True" ]; then
     reward_answer_weight=0.0
     reward_format_weight=0.0
@@ -207,6 +214,11 @@ if [ "$reward_enable" != "True" ]; then
     reward_action_correctness_weight=0.0
     reward_hallucinated_id_penalty_weight=0.0
     reward_tool_invalid_penalty_weight=0.0
+    reward_process_penalty_weight=0.0
+    reward_retrieval_weight=0.0
+    reward_refinement_weight=0.0
+    reward_query_weight=0.0
+    reward_action_penalty_turn_weight=0.0
 fi
 ppo_micro_batch_size_per_gpu=1
 ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU_OVERRIDE:-10240}
@@ -265,7 +277,7 @@ elif [ "$enable_stratified_sampler" = "True" ]; then
 else
     sampler_mode="default"
 fi
-log_trace "train_config rl_alg=$rl_alg use_kl_loss=$use_kl_loss dapo_filter=$enable_dapo_filter_groups norm_adv_std=$norm_adv_by_std_in_grpo clip=[$clip_ratio_low,$clip_ratio_high,$clip_ratio_c] loss_agg=$loss_agg_mode sampler=$sampler_mode reward_enable=$reward_enable reward_weights=answer:$reward_answer_weight,format:$reward_format_weight,process:$reward_enable_process,action:$reward_action_correctness_weight,hallucinated:$reward_hallucinated_id_penalty_weight,tool_invalid:$reward_tool_invalid_penalty_weight concurrency=agent_workers:$agent_loop_num_workers,max_traj:$max_concurrent_trajectories,tool_requests:$tool_server_max_concurrent_requests compact_tool_info=$compact_tool_interact_info pass_extra_fields=$pass_extra_fields_to_reward opd_enable=$opd_enable opd_topk=$opd_teacher_topk opd_coef=$opd_reason_coef obs_compression=$enable_obs_compression"
+log_trace "train_config rl_alg=$rl_alg use_kl_loss=$use_kl_loss dapo_filter=$enable_dapo_filter_groups norm_adv_std=$norm_adv_by_std_in_grpo turn_coef=$turn_advantage_coef clip=[$clip_ratio_low,$clip_ratio_high,$clip_ratio_c] loss_agg=$loss_agg_mode sampler=$sampler_mode reward_enable=$reward_enable reward_weights=answer:$reward_answer_weight,format:$reward_format_weight,process:$reward_enable_process,process_penalty:$reward_process_penalty_weight,retrieval:$reward_retrieval_weight,refinement:$reward_refinement_weight,query:$reward_query_weight,turn_action_penalty:$reward_action_penalty_turn_weight,action:$reward_action_correctness_weight,hallucinated:$reward_hallucinated_id_penalty_weight,tool_invalid:$reward_tool_invalid_penalty_weight concurrency=agent_workers:$agent_loop_num_workers,max_traj:$max_concurrent_trajectories,tool_requests:$tool_server_max_concurrent_requests compact_tool_info=$compact_tool_interact_info pass_extra_fields=$pass_extra_fields_to_reward opd_enable=$opd_enable opd_topk=$opd_teacher_topk opd_coef=$opd_reason_coef obs_compression=$enable_obs_compression"
 
 action_stop_tokens_file="$(pwd)$(mktemp)"
 mkdir -p "$(dirname "$action_stop_tokens_file")"
@@ -410,6 +422,7 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     +algorithm.filter_groups.metric=$dapo_filter_groups_metric \
     +algorithm.filter_groups.max_num_gen_batches=$dapo_max_num_gen_batches \
     algorithm.norm_adv_by_std_in_grpo=$norm_adv_by_std_in_grpo \
+    +algorithm.turn_advantage_coef=$turn_advantage_coef \
     data.train_files=$train_data \
     data.val_files=$val_data \
     data.train_batch_size=$train_batch_size \
@@ -425,6 +438,12 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     +reward_model.reward_kwargs.action_correctness_weight=$reward_action_correctness_weight \
     +reward_model.reward_kwargs.hallucinated_id_penalty_weight=$reward_hallucinated_id_penalty_weight \
     +reward_model.reward_kwargs.tool_invalid_penalty_weight=$reward_tool_invalid_penalty_weight \
+    +reward_model.reward_kwargs.process_penalty_weight=$reward_process_penalty_weight \
+    +reward_model.reward_kwargs.retrieval_reward_weight=$reward_retrieval_weight \
+    +reward_model.reward_kwargs.refinement_reward_weight=$reward_refinement_weight \
+    +reward_model.reward_kwargs.query_reward_weight=$reward_query_weight \
+    +reward_model.reward_kwargs.action_penalty_turn_weight=$reward_action_penalty_turn_weight \
+    +reward_model.reward_kwargs.retrieval_decay=$reward_retrieval_decay \
     reward_model.launch_reward_fn_async=$reward_fn_async \
     actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
