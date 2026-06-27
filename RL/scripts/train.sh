@@ -287,6 +287,15 @@ echo "action_stop_tokens_file=$action_stop_tokens_file"
 checkpoint_path="${CHECKPOINT_PATH_OVERRIDE:-$(pwd)/checkpoints_${ARTIFACT_SUFFIX}/${sft_model_name}-${benchmark}/${RUN_LOG_TAG}-n${n}-b${train_batch_size}-t${temperature}-lr${lr}-e${epoch}/}"
 mkdir -p "$checkpoint_path"
 
+save_freq="${SAVE_FREQ_OVERRIDE:--1}"
+test_freq="${TEST_FREQ_OVERRIDE:-5}"
+save_best_by_metric="${SAVE_BEST_BY_METRIC_OVERRIDE:-True}"
+save_best_metric="${SAVE_BEST_METRIC_OVERRIDE:-val-core/all/reward/mean@1}"
+save_best_mode="${SAVE_BEST_MODE_OVERRIDE:-max}"
+save_best_min_delta="${SAVE_BEST_MIN_DELTA_OVERRIDE:-0.0}"
+save_last_checkpoint="${SAVE_LAST_CHECKPOINT_OVERRIDE:-False}"
+log_trace "checkpoint_config path=$checkpoint_path save_freq=$save_freq test_freq=$test_freq save_best_by_metric=$save_best_by_metric save_best_metric=$save_best_metric save_best_mode=$save_best_mode save_best_min_delta=$save_best_min_delta save_last=$save_last_checkpoint"
+
 action_extract_tokens_file="$(pwd)/$(mktemp)"
 echo -e -n "$action_extract_tokens" | tee "$action_extract_tokens_file"
 
@@ -534,10 +543,14 @@ PYTHONUNBUFFERED=1 python3 -m verl_tool.trainer.main_ppo \
     trainer.nnodes=$n_nodes \
     +trainer.remove_previous_ckpt_in_save=True \
     trainer.default_local_dir=$checkpoint_path \
-    trainer.save_freq=10 \
-    trainer.test_freq=5 \
+    trainer.save_freq=$save_freq \
+    trainer.test_freq=$test_freq \
+    +trainer.save_best_by_metric=$save_best_by_metric \
+    +trainer.save_best_metric="$save_best_metric" \
+    +trainer.save_best_mode=$save_best_mode \
+    +trainer.save_best_min_delta=$save_best_min_delta \
     trainer.total_epochs=$epoch \
-    +trainer.save_last=True \
+    +trainer.save_last=$save_last_checkpoint \
     > "$TRAIN_LOG_DIR/${train_log_name}.log" 2>&1
 
 train_exit_code=$?
