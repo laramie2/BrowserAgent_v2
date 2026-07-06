@@ -88,6 +88,14 @@ def load_yaml(path: Path) -> dict:
         return _fallback_yaml(text)
 
 
+def _preset_for_algo(algo: str) -> str:
+    if algo == "dapo":
+        return "dapo"
+    if algo in {"ppo_opd", "opd"}:
+        return "ppo_opd"
+    return "mt_grpo"
+
+
 def merge_env(config: dict, mode: str, preset: str) -> tuple[dict[str, str], dict[str, list[str]]]:
     env: dict[str, str] = {}
     arrays: dict[str, list[str]] = {}
@@ -98,13 +106,22 @@ def merge_env(config: dict, mode: str, preset: str) -> tuple[dict[str, str], dic
                 continue
             env[str(key)] = str(value)
 
-    add_env(config.get("common", {}).get("env"))
+    common_env = config.get("common", {}).get("env")
+    train_env = config.get("train", {}).get("env")
+    auto_env = config.get("auto", {}).get("env") or {}
+
+    add_env(common_env)
 
     if mode == "train":
-        add_env(config.get("train", {}).get("env"))
+        add_env(train_env)
         add_env(config.get("presets", {}).get(preset, {}).get("env"))
     elif mode == "auto":
-        add_env(config.get("auto", {}).get("env"))
+        selected_algo = os.environ.get("TRAIN_ALGO") or str(auto_env.get("TRAIN_ALGO") or "dapo")
+        selected_preset = os.environ.get("TRAIN_PRESET") or preset or _preset_for_algo(selected_algo)
+        add_env(train_env)
+        add_env(config.get("presets", {}).get(selected_preset, {}).get("env"))
+        add_env(auto_env)
+        env.setdefault("TRAIN_PRESET", selected_preset)
         grid = config.get("auto", {}).get("grid", {})
         for key, value in grid.items():
             if isinstance(value, list):
@@ -133,7 +150,12 @@ def main() -> int:
         return 2
     mode = sys.argv[1]
     path = Path(sys.argv[2])
-    preset = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("TRAIN_PRESET", "mt_grpo")
+    if len(sys.argv) > 3:
+        preset = sys.argv[3]
+    elif mode == "auto":
+        preset = os.environ.get("TRAIN_PRESET", "")
+    else:
+        preset = os.environ.get("TRAIN_PRESET", "mt_grpo")
     config = load_yaml(path)
     env, arrays = merge_env(config, mode, preset)
     emit(env, arrays)

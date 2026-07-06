@@ -1,6 +1,7 @@
 # import nest_asyncio
 # nest_asyncio.apply()
 # import asyncio
+import logging
 import os
 import re
 from functools import lru_cache
@@ -25,12 +26,21 @@ DEFAULT_BROWSER_URL = "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/U
 DEFAULT_PROMPT_MODEL = os.getenv("MINI_WEB_ARENA_PROMPT_MODEL", "Qwen/Qwen2.5-14B-Instruct")
 DEFAULT_KIWIX_ENTRY_PATH = "/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
 
+logger = logging.getLogger(__name__)
+
 
 def _env_flag(name: str, default: bool) -> bool:
     raw_value = os.getenv(name)
     if raw_value is None:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+MINI_WEB_ARENA_DEBUG = _env_flag("MINI_WEB_ARENA_DEBUG", False)
+
+def _debug(message: str) -> None:
+    if MINI_WEB_ARENA_DEBUG:
+        logger.debug(message)
 
 
 def _normalize_start_url(url: str | None) -> str:
@@ -106,7 +116,7 @@ class WikiQAEnv(object):
             save_trace_enabled=_env_flag("MINI_WEB_ARENA_SAVE_TRACE", False),
             sleep_after_execution=0.0,
             simple_mode=True,
-            page_load_timeout=float(os.getenv("MINI_WEB_ARENA_PAGE_LOAD_TIMEOUT", "20.0")),
+            page_load_timeout=float(os.getenv("MINI_WEB_ARENA_PAGE_LOAD_TIMEOUT", "12.0")),
         )
 
         self.prompt_constructor, self.tokenizer, _ = _get_prompt_runtime(DEFAULT_PROMPT_MODEL)
@@ -164,8 +174,7 @@ class WikiQAEnv(object):
                 obs, _, terminated, _, _ = self.env.step(action_extracted)
                 # step方法内部已经调用了_wait_for_page_ready，这里不需要重复调用
             except Exception as e:
-                print("######################### Error in run step, action invalid")
-                print(action_extracted)
+                _debug(f"Error in run step, action invalid: {action_extracted}")
                 action_extracted = create_none_action()
                 # 确保页面状态稳定后再获取观察结果
                 self.env._wait_for_page_ready()
@@ -227,13 +236,13 @@ class WikiQAEnv(object):
             for item in history:
                 if item["role"] == "system":
                     # ans += self.template_dict['system']
-                    print(item)
+                    _debug(f"role not recognized: {item}")
                     raise ValueError("role not recognized")
                 elif item["role"] == "user":
                     ans += self.pure_obs_temp.format(objective=item["question"], url=item["url"], observation=item["observation"],
                                                      previous_action=item["previous_action"])
                 else:
-                    print(item)
+                    _debug(f"role not recognized: {item}")
                     raise ValueError("role not recognized")
             return ans
         else:
@@ -244,7 +253,7 @@ class WikiQAEnv(object):
             if hasattr(self, "env") and self.env is not None:
                 self.env.close()
         except Exception as e:
-            print("Error closing environment:", e)
+            logger.debug("Error closing environment: %s", e)
 
     # ============== Tool Functions ==============
     def extract_action(self, response: str):
@@ -261,7 +270,7 @@ class WikiQAEnv(object):
             action = create_id_based_action(parsed_response)
             action["raw_prediction"] = response
         except ActionParsingError as e:
-            print(f"ActionParsingError: {e}")
+            _debug(f"ActionParsingError: {e}")
             action = create_none_action()
             parsed_response = "The action is invalid, please retry"
         return action, parsed_response

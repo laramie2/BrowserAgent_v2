@@ -2,6 +2,7 @@
 # nest_asyncio.apply()
 # import asyncio
 import json
+import logging
 import re
 import time
 from collections import defaultdict
@@ -32,6 +33,21 @@ from .utils import (
 import base64
 import os
 from .scripts import *
+
+logger = logging.getLogger(__name__)
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+MINI_WEB_ARENA_DEBUG = _env_flag("MINI_WEB_ARENA_DEBUG", False)
+
+def _debug(message: str) -> None:
+    if MINI_WEB_ARENA_DEBUG:
+        logger.debug(message)
 
 Trajectory = list[Union[StateInfo, Action]]
 
@@ -144,10 +160,10 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             os.getenv("MINI_WEB_ARENA_BUSY_CHECK_INTERVAL", "0.2")
         )
         self.busy_wait_timeout = float(
-            os.getenv("MINI_WEB_ARENA_BUSY_WAIT_TIMEOUT", "6.0")
+            os.getenv("MINI_WEB_ARENA_BUSY_WAIT_TIMEOUT", "3.0")
         )
         self.search_page_busy_wait_timeout = float(
-            os.getenv("MINI_WEB_ARENA_SEARCH_BUSY_WAIT_TIMEOUT", "10.0")
+            os.getenv("MINI_WEB_ARENA_SEARCH_BUSY_WAIT_TIMEOUT", "5.0")
         )
         self.ready_stable_delay = float(
             os.getenv("MINI_WEB_ARENA_READY_STABLE_DELAY", "0.1")
@@ -156,16 +172,16 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             os.getenv("MINI_WEB_ARENA_FORCED_CONTINUE_DELAY", "0.2")
         )
         self.page_ready_exception_delay = float(
-            os.getenv("MINI_WEB_ARENA_READY_EXCEPTION_DELAY", "0.5")
+            os.getenv("MINI_WEB_ARENA_READY_EXCEPTION_DELAY", "0.1")
         )
         self.stop_before_observation = os.getenv(
             "MINI_WEB_ARENA_STOP_BEFORE_OBS", "0"
         ).strip().lower() in {"1", "true", "yes", "on"}
         self.observation_retry_count = int(
-            os.getenv("MINI_WEB_ARENA_OBS_RETRIES", "3")
+            os.getenv("MINI_WEB_ARENA_OBS_RETRIES", "1")
         )
         self.observation_retry_delay = float(
-            os.getenv("MINI_WEB_ARENA_OBS_RETRY_DELAY", "0.5")
+            os.getenv("MINI_WEB_ARENA_OBS_RETRY_DELAY", "0.2")
         )
 
         match observation_type:
@@ -279,17 +295,17 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         """
         for attempt in range(max_retries):
             try:
-                print(f"[DEBUG] 尝试导航到 {url} (第{attempt + 1}/{max_retries}次)")
+                _debug(f"尝试导航到 {url} (第{attempt + 1}/{max_retries}次)")
                 page.goto(url, timeout=timeout)
-                print(f"[DEBUG] 成功导航到 {url}")
+                _debug(f"成功导航到 {url}")
                 return True
             except Exception as e:
-                print(f"[WARN] 导航失败 (第{attempt + 1}/{max_retries}次): {e}")
+                _debug(f"导航失败 (第{attempt + 1}/{max_retries}次): {e}")
                 if attempt < max_retries - 1:
-                    print(f"[DEBUG] 等待5秒后重试...")
+                    _debug("等待5秒后重试...")
                     time.sleep(5)
                 else:
-                    print(f"[ERROR] 经过{max_retries}次尝试后仍无法导航到 {url}")
+                    logger.warning("经过%s次尝试后仍无法导航到 %s", max_retries, url)
                     raise e
         return False
 
@@ -308,9 +324,9 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
                 max_wait_time,
                 max(busy_wait_budget, self.search_page_busy_wait_timeout),
             )
-            print(f"[DEBUG] 检测到搜索页面，busy等待预算调整为 {busy_wait_budget} 秒")
+            _debug(f"检测到搜索页面，busy等待预算调整为 {busy_wait_budget} 秒")
         
-        print(f"[DEBUG] 开始等待页面加载完成... (URL: {current_url})")
+        _debug(f"开始等待页面加载完成... (URL: {current_url})")
         
         try:
             # 第一步：等待基本加载状态
@@ -319,9 +335,9 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
                     'domcontentloaded',
                     timeout=self.domcontentloaded_timeout_ms,
                 )
-                print(f"[DEBUG] DOM内容加载完成")
+                _debug("DOM内容加载完成")
             except Exception as e:
-                print(f"[DEBUG] DOM加载等待超时: {e}")
+                _debug(f"DOM加载等待超时: {e}")
             
             # 第二步：等待网络空闲
             try:
@@ -329,9 +345,9 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
                     'networkidle',
                     timeout=self.networkidle_timeout_ms,
                 )
-                print(f"[DEBUG] 网络空闲状态达到")
+                _debug("网络空闲状态达到")
             except Exception as e:
-                print(f"[DEBUG] 网络空闲等待超时: {e}")
+                _debug(f"网络空闲等待超时: {e}")
             
             # 第三步：检查busy状态并等待
             busy_check_count = 0
@@ -351,28 +367,28 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
                             is_busy = self._accessibility_root_is_busy(root_node)
                             
                             if not is_busy:
-                                print(f"[DEBUG] 页面不再忙碌，等待完成 (耗时: {time.time() - start_time:.2f}秒)")
+                                _debug(f"页面不再忙碌，等待完成 (耗时: {time.time() - start_time:.2f}秒)")
                                 break
                             else:
-                                print(f"[DEBUG] 页面仍在忙碌状态，继续等待... ({busy_check_count}/{max_busy_checks})")
+                                _debug(f"页面仍在忙碌状态，继续等待... ({busy_check_count}/{max_busy_checks})")
                                 time.sleep(check_interval)
                                 busy_check_count += 1
                         else:
-                            print(f"[DEBUG] 无法获取accessibility tree，停止busy检查")
+                            _debug("无法获取accessibility tree，停止busy检查")
                             break
                     else:
                         # 如果不是accessibility_tree模式，直接跳出
                         break
                         
                 except Exception as e:
-                    print(f"[DEBUG] busy状态检查失败: {e}")
+                    _debug(f"busy状态检查失败: {e}")
                     time.sleep(check_interval)
                     busy_check_count += 1
                     continue
             
             # 如果仍然busy，给出警告但继续执行
             if busy_check_count >= max_busy_checks:
-                print(f"[WARN] 页面在{busy_wait_budget}秒后仍处于busy状态，强制继续")
+                _debug(f"页面在{busy_wait_budget}秒后仍处于busy状态，强制继续")
                 time.sleep(self.forced_continue_delay)
             else:
                 # 额外等待一小段时间确保稳定
@@ -380,7 +396,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
                     
         except Exception as e:
             # 如果等待过程中出现异常，记录但不中断流程
-            print(f"[WARN] Page ready check failed: {e}")
+            _debug(f"Page ready check failed: {e}")
             # 至少等待一个基本的时间
             time.sleep(self.page_ready_exception_delay)
 
@@ -597,7 +613,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
         self.reset_finished = False
 
         if errors:
-            print(f"[WARN] Browser runtime close had {len(errors)} error(s): {errors[-1]}")
+            logger.debug("Browser runtime close had %d error(s): %s", len(errors), errors[-1])
 
     def step(
             self, action: Action
