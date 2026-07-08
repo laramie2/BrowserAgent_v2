@@ -1,0 +1,31 @@
+{
+  "stage_id": 1,
+  "name": "stage_1_medium_warmup",
+  "size": 3000,
+  "difficulty_counts": {
+    "easy_high": 750,
+    "hard": 300,
+    "medium_high": 750,
+    "medium_low": 450,
+    "medium_mid": 750
+  },
+  "source_counts": {
+    "hotpot": 1500,
+    "nq": 1500
+  },
+  "source_difficulty_counts": {
+    "hotpot:easy_high": 375,
+    "hotpot:hard": 150,
+    "hotpot:medium_high": 375,
+    "hotpot:medium_low": 225,
+    "hotpot:medium_mid": 375,
+    "nq:easy_high": 375,
+    "nq:hard": 150,
+    "nq:medium_high": 375,
+    "nq:medium_low": 225,
+    "nq:medium_mid": 375
+  },
+  "data_parquet": "/data/yutao/lzt/BrowserAgent_v2/RL/filter_results/curriculum_medium_disjoint_n3000_seed42/stage_1_medium_warmup/data.parquet",
+  "selected_scores_jsonl": "/data/yutao/lzt/BrowserAgent_v2/RL/filter_results/curriculum_medium_disjoint_n3000_seed42/stage_1_medium_warmup/selected_scores.jsonl",
+  "difficulty_buckets_csv": "/data/yutao/lzt/BrowserAgent_v2/RL/filter_results/curriculum_medium_disjoint_n3000_seed42/stage_1_medium_warmup/difficulty_buckets.csv"
+}
