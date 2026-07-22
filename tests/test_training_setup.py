@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -419,6 +420,21 @@ class RepositoryAssetTest(unittest.TestCase):
         for relative in required:
             with self.subTest(relative=relative):
                 self.assertTrue((root / "RL/dataset" / relative).is_file())
+
+    def test_unapproved_rl_dataset_paths_remain_ignored(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                "git",
+                "check-ignore",
+                "--no-index",
+                "--quiet",
+                "RL/dataset/unapproved/data.parquet",
+            ],
+            cwd=root,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":
