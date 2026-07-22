@@ -26,6 +26,7 @@ REQUIRED_RL_DATA = (
     "t0-e0.25-mh0.25-mm0.25-ml0.15-h0.10-2000/data.parquet",
     "t0-e0.25-mh0.25-mm0.25-ml0.15-h0.10-3000/data.parquet",
 )
+SFT_REPO_ID = "Laramie2/browseragent-sft-lora"
 
 
 class SetupError(RuntimeError):
@@ -57,6 +58,14 @@ class ProjectPaths:
             kiwix_archive=tools / "kiwix-tools_linux-x86_64-3.3.0.tar.gz",
             kiwix_directory=tools / "kiwix-tools_linux-x86_64-3.3.0",
         )
+
+
+@dataclass(frozen=True)
+class SftResult:
+    top_level: str
+    checkpoint: Path
+    merged_output: Path
+    model_name: str
 
 
 @dataclass
@@ -233,6 +242,200 @@ def prepare_resources(
         runner.run(commands[2])
         combine_zim_parts(list(zim.parent.glob(f"{ZIM_NAME}.part-*")), zim)
     ensure_wiki_copies(paths.wiki_root, wiki_copies)
+
+
+def swift_command(environment: str = "swift-sft") -> list[str]:
+    swift = shutil.which("swift")
+    if swift:
+        return [swift]
+    conda = shutil.which("conda")
+    if conda:
+        return [
+            conda,
+            "run",
+            "--no-capture-output",
+            "-n",
+            environment,
+            "swift",
+        ]
+    raise SetupError(
+        "Cannot find swift or conda; install the swift-sft environment first"
+    )
+
+
+def is_complete_merged_model(path: Path) -> bool:
+    has_config = (path / "config.json").is_file()
+    has_weights = any(path.glob("*.safetensors")) or any(path.glob("*.bin"))
+    return has_config and has_weights
+
+
+def _repair_merged_metadata(base_model: Path, output: Path) -> None:
+    for source in base_model.iterdir():
+        if not source.is_file():
+            continue
+        if source.suffix in {".safetensors", ".bin"}:
+            continue
+        if source.name.endswith("index.json"):
+            continue
+        shutil.copy2(source, output / source.name)
+    for name in ("processor_config.json", "chat_template.jinja"):
+        (output / name).unlink(missing_ok=True)
+
+
+def merge_lora(
+    paths: ProjectPaths,
+    checkpoint: Path,
+    top_level: str,
+    runner: CommandRunner,
+    force: bool,
+) -> Path:
+    if Path(top_level).name != top_level:
+        raise SetupError(f"Invalid SFT directory name: {top_level}")
+    sft_model_name(top_level)
+    output = paths.rl_models / f"{top_level}-merged"
+    if output.is_symlink():
+        raise SetupError(f"Merged output must not be a symbolic link: {output}")
+    if is_complete_merged_model(output):
+        return output
+    if output.exists():
+        if output.resolve().parent != paths.rl_models.resolve():
+            raise SetupError(
+                f"Refusing to remove output outside RL/models: {output}"
+            )
+        if not force:
+            raise SetupError(
+                f"Merged output exists but is incomplete: {output}; use --force"
+            )
+    if not paths.base_model.is_dir():
+        raise SetupError(
+            f"Base model is missing: {paths.base_model}; run prepare first"
+        )
+    if not checkpoint.is_dir():
+        raise SetupError(f"SFT checkpoint is missing: {checkpoint}")
+    export_command = swift_command() + [
+        "export",
+        "--model",
+        str(paths.base_model),
+        "--adapters",
+        str(checkpoint),
+        "--merge_lora",
+        "true",
+        "--output_dir",
+        str(output),
+    ]
+    if output.exists():
+        if output.is_dir():
+            shutil.rmtree(output)
+        else:
+            output.unlink()
+    paths.rl_models.mkdir(parents=True, exist_ok=True)
+    runner.run(export_command)
+    if not is_complete_merged_model(output):
+        raise SetupError(
+            f"Swift completed without a valid merged model: {output}"
+        )
+    _repair_merged_metadata(paths.base_model, output)
+    return output
+
+
+def list_sft_repo_files() -> list[str]:
+    try:
+        from huggingface_hub import HfApi
+    except ImportError as error:
+        raise SetupError(
+            "huggingface_hub is required; install it to provide the hf CLI"
+        ) from error
+    try:
+        return list(
+            HfApi().list_repo_files(SFT_REPO_ID, repo_type="model")
+        )
+    except Exception as error:
+        raise SetupError(
+            f"Cannot list SFT repository {SFT_REPO_ID}: {error}"
+        ) from error
+
+
+def select_repo_checkpoint(
+    repo_files: Iterable[str], top_level: str
+) -> Path:
+    candidates: list[tuple[datetime, int, Path]] = []
+    for repo_file in repo_files:
+        parts = Path(repo_file).parts
+        if len(parts) < 4 or parts[0] != top_level:
+            continue
+        version_match = VERSION_PATTERN.fullmatch(parts[1])
+        checkpoint_match = CHECKPOINT_PATTERN.fullmatch(parts[2])
+        if not version_match or not checkpoint_match:
+            continue
+        stamp = datetime.strptime(
+            "".join(version_match.groups()), "%Y%m%d%H%M%S"
+        )
+        candidates.append(
+            (
+                stamp,
+                int(checkpoint_match.group(1)),
+                Path(parts[1]) / parts[2],
+            )
+        )
+    if not candidates:
+        raise SetupError(f"No timestamped checkpoint found for {top_level}")
+    return max(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+def prepare_sft(
+    paths: ProjectPaths,
+    dataset_id: str,
+    runner: CommandRunner,
+    force: bool,
+    repo_files: Iterable[str] | None = None,
+) -> SftResult:
+    files = list(repo_files) if repo_files is not None else list_sft_repo_files()
+    top_level = match_sft_directory(files, dataset_id)
+    runner.run(
+        [
+            "hf",
+            "download",
+            SFT_REPO_ID,
+            "--repo-type",
+            "model",
+            "--include",
+            f"{top_level}/*",
+            "--local-dir",
+            str(paths.sft_output),
+        ]
+    )
+    if runner.dry_run:
+        relative_checkpoint = select_repo_checkpoint(files, top_level)
+        checkpoint = paths.sft_output / top_level / relative_checkpoint
+        merged_output = paths.rl_models / f"{top_level}-merged"
+        runner.run(
+            [
+                "swift",
+                "export",
+                "--model",
+                str(paths.base_model),
+                "--adapters",
+                str(checkpoint),
+                "--merge_lora",
+                "true",
+                "--output_dir",
+                str(merged_output),
+            ]
+        )
+        return SftResult(
+            top_level=top_level,
+            checkpoint=checkpoint,
+            merged_output=merged_output,
+            model_name=sft_model_name(top_level),
+        )
+    checkpoint = select_checkpoint(paths.sft_output / top_level)
+    merged_output = merge_lora(paths, checkpoint, top_level, runner, force)
+    return SftResult(
+        top_level=top_level,
+        checkpoint=checkpoint,
+        merged_output=merged_output,
+        model_name=sft_model_name(top_level),
+    )
 
 
 def _top_level_directories(repo_files: Iterable[str]) -> list[str]:

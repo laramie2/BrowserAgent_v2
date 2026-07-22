@@ -12,15 +12,20 @@ from unittest.mock import patch
 from scripts.training_setup import (
     CommandRunner,
     ProjectPaths,
+    SftResult,
     SetupError,
     combine_zim_parts,
     ensure_wiki_copies,
+    is_complete_merged_model,
     match_sft_directory,
+    merge_lora,
     prepare_resources,
+    prepare_sft,
     safe_extract_kiwix,
     select_checkpoint,
     sha256_file,
     sft_model_name,
+    swift_command,
 )
 
 
@@ -192,6 +197,207 @@ class PrepareResourcesTest(unittest.TestCase):
                     ["hf", "download", "cogito233/WikiEnv"],
                 ],
             )
+            self.assertFalse(root.exists())
+
+
+class MergeTest(unittest.TestCase):
+    def test_swift_command_prefers_current_path(self) -> None:
+        with patch(
+            "scripts.training_setup.shutil.which",
+            side_effect=lambda name: "/env/bin/swift" if name == "swift" else None,
+        ):
+            self.assertEqual(swift_command(), ["/env/bin/swift"])
+
+    def test_swift_command_falls_back_to_conda_environment(self) -> None:
+        with patch(
+            "scripts.training_setup.shutil.which",
+            side_effect=lambda name: "/conda/bin/conda" if name == "conda" else None,
+        ):
+            self.assertEqual(
+                swift_command(),
+                [
+                    "/conda/bin/conda",
+                    "run",
+                    "--no-capture-output",
+                    "-n",
+                    "swift-sft",
+                    "swift",
+                ],
+            )
+
+    def test_complete_merged_model_requires_config_and_weights(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "config.json").write_text("{}", encoding="utf-8")
+            self.assertFalse(is_complete_merged_model(output))
+            (output / "model.safetensors").write_bytes(b"weights")
+            self.assertTrue(is_complete_merged_model(output))
+
+    def test_merge_runs_foreground_export_and_repairs_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = ProjectPaths.from_root(root)
+            paths.base_model.mkdir(parents=True)
+            (paths.base_model / "config.json").write_text(
+                '{"base": true}', encoding="utf-8"
+            )
+            (paths.base_model / "tokenizer.json").write_text("{}", encoding="utf-8")
+            (paths.base_model / "model.safetensors").write_bytes(b"base")
+            checkpoint = root / "checkpoint-854"
+            checkpoint.mkdir()
+            runner = RecordingRunner()
+            output = (
+                paths.rl_models / "Qwen2.5-VL-7B-Instruct-example-merged"
+            )
+
+            def create_fake_output(args, *, cwd=None):
+                runner.commands.append([str(value) for value in args])
+                output.mkdir(parents=True)
+                (output / "model.safetensors").write_bytes(b"merged")
+                (output / "config.json").write_text("{}", encoding="utf-8")
+                (output / "processor_config.json").write_text(
+                    "{}", encoding="utf-8"
+                )
+                (output / "chat_template.jinja").write_text(
+                    "template", encoding="utf-8"
+                )
+
+            runner.run = create_fake_output
+            result = merge_lora(
+                paths,
+                checkpoint,
+                "Qwen2.5-VL-7B-Instruct-example",
+                runner,
+                force=False,
+            )
+            self.assertEqual(result, output)
+            self.assertIn("--adapters", runner.commands[0])
+            self.assertEqual(
+                (output / "tokenizer.json").read_text(encoding="utf-8"), "{}"
+            )
+            self.assertFalse((output / "processor_config.json").exists())
+            self.assertFalse((output / "chat_template.jinja").exists())
+
+    def test_merge_rejects_incomplete_output_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = ProjectPaths.from_root(Path(directory))
+            output = paths.rl_models / "Qwen2.5-VL-7B-Instruct-example-merged"
+            output.mkdir(parents=True)
+            runner = RecordingRunner()
+            with self.assertRaisesRegex(SetupError, "incomplete"):
+                merge_lora(
+                    paths,
+                    Path(directory) / "checkpoint-1",
+                    "Qwen2.5-VL-7B-Instruct-example",
+                    runner,
+                    force=False,
+                )
+            self.assertEqual(runner.commands, [])
+
+    def test_merge_rejects_symlink_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = ProjectPaths.from_root(root / "project")
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "config.json").write_text("{}", encoding="utf-8")
+            (outside / "model.safetensors").write_bytes(b"weights")
+            paths.rl_models.mkdir(parents=True)
+            output = paths.rl_models / "Qwen2.5-VL-7B-Instruct-example-merged"
+            output.symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(SetupError, "symbolic link"):
+                merge_lora(
+                    paths,
+                    root / "checkpoint-1",
+                    "Qwen2.5-VL-7B-Instruct-example",
+                    RecordingRunner(),
+                    force=True,
+                )
+
+    def test_force_keeps_incomplete_output_when_swift_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = ProjectPaths.from_root(root)
+            paths.base_model.mkdir(parents=True)
+            checkpoint = root / "checkpoint-1"
+            checkpoint.mkdir()
+            output = paths.rl_models / "Qwen2.5-VL-7B-Instruct-example-merged"
+            output.mkdir(parents=True)
+            marker = output / "partial.marker"
+            marker.write_text("keep", encoding="utf-8")
+            with patch("scripts.training_setup.shutil.which", return_value=None):
+                with self.assertRaisesRegex(SetupError, "Cannot find swift"):
+                    merge_lora(
+                        paths,
+                        checkpoint,
+                        "Qwen2.5-VL-7B-Instruct-example",
+                        RecordingRunner(),
+                        force=True,
+                    )
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+
+class PrepareSftTest(unittest.TestCase):
+    def test_prepare_sft_downloads_unique_directory_and_returns_training_value(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = ProjectPaths.from_root(root)
+            top_level = "Qwen2.5-VL-7B-Instruct-task-opsrc-hotpot6500-nq6300-cr1_2-2048-sft-5e-5lr-freeze_false"
+            repo_files = [
+                f"{top_level}/v5-20260705-013607/checkpoint-854/adapter_config.json"
+            ]
+            runner = RecordingRunner()
+
+            def fake_run(args, *, cwd=None):
+                runner.commands.append([str(value) for value in args])
+                if list(args[:2]) == ["hf", "download"]:
+                    checkpoint = (
+                        paths.sft_output
+                        / top_level
+                        / "v5-20260705-013607/checkpoint-854"
+                    )
+                    checkpoint.mkdir(parents=True)
+
+            runner.run = fake_run
+            merged = paths.rl_models / f"{top_level}-merged"
+            with patch("scripts.training_setup.merge_lora", return_value=merged):
+                result = prepare_sft(
+                    paths,
+                    "hotpot6500-nq6300-cr1_2-2048",
+                    runner,
+                    force=False,
+                    repo_files=repo_files,
+                )
+            self.assertIsInstance(result, SftResult)
+            self.assertEqual(result.top_level, top_level)
+            self.assertEqual(result.checkpoint.name, "checkpoint-854")
+            self.assertEqual(
+                result.model_name,
+                "task-opsrc-hotpot6500-nq6300-cr1_2-2048-sft-5e-5lr-freeze_false",
+            )
+            self.assertIn(f"{top_level}/*", runner.commands[0])
+
+    def test_prepare_sft_dry_run_uses_remote_checkpoint_without_filesystem_changes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            paths = ProjectPaths.from_root(root)
+            top_level = "Qwen2.5-VL-7B-Instruct-task-opsrc-example-sft-5e-5lr-freeze_false"
+            repo_files = [
+                f"{top_level}/v1-20260704-235959/checkpoint-999/adapter_config.json",
+                f"{top_level}/v2-20260705-013607/checkpoint-99/adapter_config.json",
+                f"{top_level}/v2-20260705-013607/checkpoint-854/adapter_config.json",
+            ]
+            runner = RecordingRunner(dry_run=True)
+            result = prepare_sft(
+                paths, "example", runner, force=False, repo_files=repo_files
+            )
+            self.assertEqual(result.checkpoint.name, "checkpoint-854")
+            self.assertEqual(runner.commands[0][:2], ["hf", "download"])
+            self.assertEqual(runner.commands[1][0:2], ["swift", "export"])
             self.assertFalse(root.exists())
 
 
