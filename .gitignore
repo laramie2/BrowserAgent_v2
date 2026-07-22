@@ -24,3 +24,4 @@ sft/output/
 sft/done
 *.tar.gz
 *.pkl
+.worktrees/
