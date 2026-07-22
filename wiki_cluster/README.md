@@ -1,14 +1,33 @@
 # Native Wiki Cluster
 
 This directory can run the local Wikipedia ZIM service without Docker. It starts
-multiple `kiwix-serve` processes over four read-only ZIM copies and exposes a
-single load-balanced entry point on port `22015`. By default, each ZIM copy runs
-two backend processes.
+multiple `kiwix-serve` processes over one or more read-only ZIM paths and
+exposes a single load-balanced entry point on port `22015`. By default, each
+ZIM path runs two backend processes.
+
+## Prepare Wiki Assets
+
+From the project root, the training preparation CLI verifies and extracts the
+bundled Kiwix 3.3.0 archive, downloads the Wiki ZIM parts, and assembles the ZIM
+locally:
+
+```bash
+python3 scripts/prepare_training.py prepare
+```
+
+The default layout stores one physical ZIM and `./wiki_cluster/start.sh` uses
+one ZIM path. To expose four compatible paths without duplicating the ZIM
+bytes:
+
+```bash
+python3 scripts/prepare_training.py prepare --wiki-copies 4
+ZIM_COPIES=4 ./wiki_cluster/start.sh
+```
 
 ## Start
 
 ```bash
-cd /data/yutao/lzt/BrowserAgent_v2/wiki_cluster
+cd /path/to/BrowserAgent_v2/wiki_cluster
 ./start.sh
 ```
 
@@ -32,7 +51,7 @@ KIWIX_SERVE_BIN=/path/to/kiwix-serve ./start.sh
 ```bash
 ZIM_ROOT=/path/to/webarena_zim
 ZIM_NAME=wikipedia_en_all_maxi_2022-05.zim
-ZIM_COPIES=4
+ZIM_COPIES=1
 WORKERS_PER_ZIM=2
 ZIM_PATHS=/path/to/copy1.zim,/path/to/copy2.zim
 PORT_START=22115

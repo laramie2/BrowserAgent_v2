@@ -8,7 +8,7 @@ DEFAULT_ZIM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)/webarena/webarena_zim"
 BUNDLED_KIWIX_SERVE="$SCRIPT_DIR/tools/kiwix-tools_linux-x86_64-3.3.0/kiwix-serve"
 ZIM_ROOT="${ZIM_ROOT:-$DEFAULT_ZIM_ROOT}"
 ZIM_NAME="${ZIM_NAME:-wikipedia_en_all_maxi_2022-05.zim}"
-ZIM_COPIES="${ZIM_COPIES:-4}"
+ZIM_COPIES="${ZIM_COPIES:-1}"
 WORKERS_PER_ZIM="${WORKERS_PER_ZIM:-2}"
 if [[ -x "$BUNDLED_KIWIX_SERVE" ]]; then
     KIWIX_SERVE_BIN="${KIWIX_SERVE_BIN:-$BUNDLED_KIWIX_SERVE}"
