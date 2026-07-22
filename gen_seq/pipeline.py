@@ -9,10 +9,60 @@ import base64
 import threading
 import time
 import io
+import string
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any, Optional,Tuple
+from typing import List, Dict, Any, Optional, Tuple
 
 from VTC_tool.VTC_tool import VTCTool
+
+
+def normalize_answer(s: str) -> str:
+    """Normalize answers using the same rules as AgentOCR search EM."""
+    def remove_articles(text: str) -> str:
+        return re.sub(r"\b(a|an|the)\b", " ", text)
+
+    def white_space_fix(text: str) -> str:
+        return " ".join(text.split())
+
+    def remove_punc(text: str) -> str:
+        exclude = set(string.punctuation)
+        return "".join(ch for ch in text if ch not in exclude)
+
+    def lower(text: str) -> str:
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(str(s)))))
+
+
+def ensure_answer_list(golden_answers: Any) -> List[str]:
+    """Convert parquet/JSON answer containers to a JSON-serializable list."""
+    if golden_answers is None:
+        return []
+    if isinstance(golden_answers, str):
+        return [golden_answers]
+    if hasattr(golden_answers, "tolist"):
+        golden_answers = golden_answers.tolist()
+    if not isinstance(golden_answers, (list, tuple)):
+        golden_answers = [golden_answers]
+    return [str(answer) for answer in golden_answers if answer is not None]
+
+
+def em_check(prediction: str, golden_answers: Any) -> int:
+    normalized_prediction = normalize_answer(prediction)
+    return int(any(
+        normalize_answer(golden_answer) == normalized_prediction
+        for golden_answer in ensure_answer_list(golden_answers)
+    ))
+
+
+def substring_check(prediction: str, golden_answers: Any) -> int:
+    normalized_prediction = normalize_answer(prediction)
+    for golden_answer in ensure_answer_list(golden_answers):
+        normalized_golden_answer = normalize_answer(golden_answer)
+        if normalized_golden_answer and normalized_golden_answer in normalized_prediction:
+            return 1
+    return 0
+
 
 def generate_image_for_observation(vtc_tool: Any, ob_text: str, output_dir: str, step_id: str) -> Tuple[str, str, float]:
     """调用 VTC 渲染文字为图像并在内存中转换为 Base64，同时异步保存，返回(Base64, 路径, 耗时)"""
@@ -23,6 +73,9 @@ def generate_image_for_observation(vtc_tool: Any, ob_text: str, output_dir: str,
         max_width=2048, 
         max_height=2048
     )
+
+    img = vtc_tool.compress_image_arrays([img],compression_factor=1.2)[0]
+    
     render_time = time.perf_counter() - start_render
 
     # 内存中转 Base64，避免读盘耗时
@@ -43,15 +96,19 @@ class DataLoader:
     def __init__(self, data_path: str):
         self.data_path = data_path
 
-    def load_and_sample(self, frac: float = 1.0, random_state: int = 42) -> pd.DataFrame:
+    def load(self) -> pd.DataFrame:
         if self.data_path.endswith('.parquet'):
-            df = pd.read_parquet(self.data_path)
-        elif self.data_path.endswith('.jsonl'):
-            df = pd.read_json(self.data_path, lines=True)
-        else:
-            raise ValueError("Unsupported data format. Please use .parquet or .jsonl")
-        
-        return df.sample(frac=frac, random_state=random_state).reset_index(drop=True)
+            return pd.read_parquet(self.data_path)
+        if self.data_path.endswith('.jsonl'):
+            return pd.read_json(self.data_path, lines=True)
+        raise ValueError("Unsupported data format. Please use .parquet or .jsonl")
+
+    def load_and_select(self, max_samples: int, sample_seed: Optional[int] = None) -> pd.DataFrame:
+        df = self.load()
+        total_samples = min(max_samples, len(df))
+        if sample_seed is None or sample_seed == 0:
+            return df.head(total_samples).reset_index(drop=True)
+        return df.sample(n=total_samples, random_state=sample_seed).reset_index(drop=True)
 
 class TextBrowserEnv:
     """环境交互器：负责与 verl-tool 服务器（TextBrowser）交互"""
@@ -241,10 +298,11 @@ HISTORY_info: {}
             with open(self.output_file, "a", encoding="utf-8") as fw:
                 fw.write(json.dumps(trajectory_data, ensure_ascii=False) + "\n")
 
-    def run_single_episode(self, question: str, ground_truth: str, sample_idx: int, trial_idx: int = 1, max_steps: int = 30, model: str = "custom-llm") -> bool:
+    def run_single_episode(self, question: str, ground_truth: List[str], sample_idx: int, trial_idx: int = 1, max_steps: int = 30, model: str = "custom-llm") -> bool:
         tar_id = str(uuid.uuid4())
         history_actions = "\n"
         history_info = "\n"
+        ground_truth = ensure_answer_list(ground_truth)
         
         # 记录首次环境耗时
         t0_env = time.perf_counter()
@@ -260,7 +318,9 @@ HISTORY_info: {}
             "ground_truth": ground_truth,
             "steps": [],
             "final_conclusion": "",
-            "success": False
+            "success": False,
+            "success_em": False,
+            "success_substring": False
         }
 
         # === 单独记录耗时数据结构 ===
@@ -340,7 +400,9 @@ HISTORY_info: {}
                     final_answer = action.replace("stop", "").strip(" []")
                 
                 trajectory["final_conclusion"] = final_answer
-                trajectory["success"] = (ground_truth.lower() in final_answer.lower()) if ground_truth else False
+                trajectory["success_em"] = bool(em_check(final_answer, ground_truth)) if ground_truth else False
+                trajectory["success_substring"] = bool(substring_check(final_answer, ground_truth)) if ground_truth else False
+                trajectory["success"] = trajectory["success_em"]
                 break
                 
         # 1. 保存主轨迹数据
@@ -360,6 +422,7 @@ def main():
     parser.add_argument('--data_path', type=str, required=True)
     parser.add_argument('--system_prompt', type=str, default='./system_prompt_with_history_info.txt')
     parser.add_argument('--max_samples', type=int, default=300)
+    parser.add_argument('--sample_seed', '--sample-seed', type=str, default='', help="Random seed for sample selection. Empty or 0 keeps sequential order.")
     parser.add_argument('--base_url', type=str, default='http://localhost:8008/v1/')
     parser.add_argument('--model', type=str, default='custom-llm')
     
@@ -390,19 +453,22 @@ def main():
         image_output_dir=args.image_output_dir
     )
 
-    data_df = data_loader.load_and_sample()
-    total_samples = min(args.max_samples, len(data_df))
+    sample_seed_text = str(args.sample_seed).strip()
+    sample_seed = None if sample_seed_text in ("", "0") else int(sample_seed_text)
+    data_df = data_loader.load_and_select(max_samples=args.max_samples, sample_seed=sample_seed)
+    total_samples = len(data_df)
+    sample_mode = "sequential" if sample_seed is None else f"random(seed={sample_seed})"
 
     # 提取固定批次的数据
     tasks = []
     for i, row in data_df.iterrows():
-        if i >= total_samples:
-            break
         question = row["extra_info"]["question"]
-        gt = row["extra_info"]["selected_answer"]
+        gt = ensure_answer_list(row["extra_info"].get("golden_answers"))
+        if not gt:
+            raise ValueError(f"Sample {i + 1} has no extra_info.golden_answers")
         tasks.append((i + 1, question, gt))
 
-    print(f"🚀 Started evaluation! Max Samples: {total_samples} | Total Trials: {args.num_trials} | Workers: {args.num_workers}")
+    print(f"🚀 Started evaluation! Max Samples: {total_samples} | Sample Mode: {sample_mode} | Total Trials: {args.num_trials} | Workers: {args.num_workers}")
     
     # 记录每次 trial 的准确率
     trial_accuracies = []
