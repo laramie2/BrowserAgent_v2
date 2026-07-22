@@ -1,0 +1,31 @@
+{
+  "stage_id": 1,
+  "name": "grpo-opsd",
+  "size": 2000,
+  "difficulty_counts": {
+    "easy_high": 500,
+    "hard": 200,
+    "medium_high": 500,
+    "medium_low": 300,
+    "medium_mid": 500
+  },
+  "source_counts": {
+    "hotpot": 1000,
+    "nq": 1000
+  },
+  "source_difficulty_counts": {
+    "hotpot:easy_high": 250,
+    "hotpot:hard": 100,
+    "hotpot:medium_high": 250,
+    "hotpot:medium_low": 150,
+    "hotpot:medium_mid": 250,
+    "nq:easy_high": 250,
+    "nq:hard": 100,
+    "nq:medium_high": 250,
+    "nq:medium_low": 150,
+    "nq:medium_mid": 250
+  },
+  "data_parquet": "/data/yutao/lzt/BrowserAgent_v2/RL/filter_results/curriculum_data/curriculum_medium_disjoint_n2000_seed42/grpo-opsd/data.parquet",
+  "selected_scores_jsonl": "/data/yutao/lzt/BrowserAgent_v2/RL/filter_results/curriculum_data/curriculum_medium_disjoint_n2000_seed42/grpo-opsd/selected_scores.jsonl",
+  "difficulty_buckets_csv": "/data/yutao/lzt/BrowserAgent_v2/RL/filter_results/curriculum_data/curriculum_medium_disjoint_n2000_seed42/grpo-opsd/difficulty_buckets.csv"
+}

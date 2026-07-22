@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from scripts.training_setup import (
     CommandRunner,
+    KIWIX_SHA256,
     ProjectPaths,
     SftResult,
     SetupError,
@@ -399,6 +400,25 @@ class PrepareSftTest(unittest.TestCase):
             self.assertEqual(runner.commands[0][:2], ["hf", "download"])
             self.assertEqual(runner.commands[1][0:2], ["swift", "export"])
             self.assertFalse(root.exists())
+
+
+class RepositoryAssetTest(unittest.TestCase):
+    def test_bundled_kiwix_and_required_rl_datasets_exist(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        paths = ProjectPaths.from_root(root)
+        self.assertTrue(paths.kiwix_archive.is_file())
+        self.assertEqual(sha256_file(paths.kiwix_archive), KIWIX_SHA256)
+        required = (
+            "hotpot/test_50.parquet",
+            "nq/test_50.parquet",
+            "test_100/data.parquet",
+            "t0-e0.25-mh0.25-mm0.25-ml0.15-h0.10-1000/data.parquet",
+            "t0-e0.25-mh0.25-mm0.25-ml0.15-h0.10-2000/data.parquet",
+            "t0-e0.25-mh0.25-mm0.25-ml0.15-h0.10-3000/data.parquet",
+        )
+        for relative in required:
+            with self.subTest(relative=relative):
+                self.assertTrue((root / "RL/dataset" / relative).is_file())
 
 
 if __name__ == "__main__":
