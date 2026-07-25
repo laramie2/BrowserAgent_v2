@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-export RAY_TMPDIR="${RAY_TMPDIR_OVERRIDE:-/home/nvidia/yutao/lzt/tmp}"
-
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export RAY_TMPDIR="${RAY_TMPDIR_OVERRIDE:-${ROOT_DIR}/.ray_tmp}"
 SCRIPT_PATH="${ROOT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 LOG_DIR="${ROOT_DIR}/logs"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
 RUN_LOG="${LOG_DIR}/eval_runner_${RUN_ID}.log"
 
 DEFAULT_MODEL_PATH="${ROOT_DIR}/sft/output/Qwen2.5-VL-7B-Instruct-task-opsrc-hotpot5459-nq6318-sft-5e-5lr-freeze_false-2epoch-merged"
-DEFAULT_OUTPUT_DIR="${ROOT_DIR}/gen_seq/results/Qwen2.5-VL-7B-Instruct-task-opsrc-hotpot5459-nq6318-sft-5e-5lr-freeze_false-2epoch-merged"
+DEFAULT_OUTPUT_DIR="${ROOT_DIR}/gen_seq/results/$(basename "${DEFAULT_MODEL_PATH}")"
 DEFAULT_PROMPT_PATH="${ROOT_DIR}/prompt/system_prompt_with_history_info.txt"
 
 # 单跳数据集
@@ -26,7 +25,7 @@ DEFAULT_BAMBOOGLE_DATA_PATH="${ROOT_DIR}/benchmark/bamboogle/test-00000-of-00001
 
 
 VLLM_MODEL_PATH="${VLLM_MODEL_PATH:-${DEFAULT_MODEL_PATH}}"
-VLLM_PYTHON="${VLLM_PYTHON:-/home/nvidia/anaconda3/envs/browseragent-v2/bin/python}"
+VLLM_PYTHON="${VLLM_PYTHON:-python}"
 VLLM_CUDA_DEVICES="${VLLM_CUDA_DEVICES:-}"
 VLLM_HOST="${VLLM_HOST:-0.0.0.0}"
 VLLM_PORT="${VLLM_PORT:-8008}"
@@ -44,16 +43,21 @@ TOOL_SERVER_PYTHON="${TOOL_SERVER_PYTHON:-python}"
 TOOL_SERVER_PORT="${TOOL_SERVER_PORT:-5000}"
 TOOL_SERVER_READY_TIMEOUT="${TOOL_SERVER_READY_TIMEOUT:-300}"
 TOOL_SERVER_HEALTH_URL="${TOOL_SERVER_HEALTH_URL:-http://127.0.0.1:${TOOL_SERVER_PORT}/health}"
-TOOL_SERVER_WORKERS_PER_TOOL="${TOOL_SERVER_WORKERS_PER_TOOL:-32}"
-TOOL_SERVER_MAX_CONCURRENT_REQUESTS="${TOOL_SERVER_MAX_CONCURRENT_REQUESTS:-32}"
-TOOL_SERVER_THREAD_POOL_SIZE="${TOOL_SERVER_THREAD_POOL_SIZE:-64}"
-TOOL_SERVER_REQUEST_TIMEOUT="${TOOL_SERVER_REQUEST_TIMEOUT:-120}"
+TOOL_SERVER_WORKERS_PER_TOOL="${TOOL_SERVER_WORKERS_PER_TOOL:-128}"
+TOOL_SERVER_MAX_CONCURRENT_REQUESTS="${TOOL_SERVER_MAX_CONCURRENT_REQUESTS:-128}"
+TOOL_SERVER_THREAD_POOL_SIZE="${TOOL_SERVER_THREAD_POOL_SIZE:-128}"
+TOOL_SERVER_REQUEST_TIMEOUT="${TOOL_SERVER_REQUEST_TIMEOUT:-300}"
 TOOL_SERVER_UVI_WORKERS="${TOOL_SERVER_UVI_WORKERS:-1}"
 TOOL_SERVER_ROUTER_WORKERS="${TOOL_SERVER_ROUTER_WORKERS:-1}"
-TEXT_BROWSER_RAY_NUM_CPUS="${TEXT_BROWSER_RAY_NUM_CPUS:-4}"
-TEXT_BROWSER_ACTION_TIMEOUT_SEC="${TEXT_BROWSER_ACTION_TIMEOUT_SEC:-120}"
-TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC="${TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC:-110}"
-VT_HEALTH_CHECK_TIMEOUT="${VT_HEALTH_CHECK_TIMEOUT:-180}"
+TEXT_BROWSER_RAY_NUM_CPUS="${TEXT_BROWSER_RAY_NUM_CPUS:-128}"
+TEXT_BROWSER_MAX_ACTIVE_ACTORS="${TEXT_BROWSER_MAX_ACTIVE_ACTORS:-128}"
+TEXT_BROWSER_IDLE_POOL_SIZE="${TEXT_BROWSER_IDLE_POOL_SIZE:-16}"
+TEXT_BROWSER_ACTOR_CPUS="${TEXT_BROWSER_ACTOR_CPUS:-1}"
+TEXT_BROWSER_ACTION_TIMEOUT_SEC="${TEXT_BROWSER_ACTION_TIMEOUT_SEC:-240}"
+TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC="${TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC:-220}"
+VT_HEALTH_CHECK_TIMEOUT="${VT_HEALTH_CHECK_TIMEOUT:-300}"
+MINI_WEB_ARENA_PROMPT_MODEL="${MINI_WEB_ARENA_PROMPT_MODEL:-${ROOT_DIR}/models/Qwen2.5-14B-Instruct}"
+MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY="${MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY:-1}"
 START_TOOL_SERVER="${START_TOOL_SERVER:-1}"
 
 PIPELINE_PYTHON="${PIPELINE_PYTHON:-python}"
@@ -76,22 +80,39 @@ HOTPOT_NUM_TRIALS="${HOTPOT_NUM_TRIALS:-1}"
 TWOWIKI_NUM_TRIALS="${TWOWIKI_NUM_TRIALS:-1}"
 MUSIQUE_NUM_TRIALS="${MUSIQUE_NUM_TRIALS:-1}"
 BAMBOOGLE_NUM_TRIALS="${BAMBOOGLE_NUM_TRIALS:-1}"
-NUM_WORKERS="${NUM_WORKERS:-16}"
-NQ_NUM_WORKERS="${NQ_NUM_WORKERS:-16}"
-TRIVIAQA_NUM_WORKERS="${TRIVIAQA_NUM_WORKERS:-16}"
-POPQA_NUM_WORKERS="${POPQA_NUM_WORKERS:-16}"
-HOTPOT_NUM_WORKERS="${HOTPOT_NUM_WORKERS:-16}"
-TWOWIKI_NUM_WORKERS="${TWOWIKI_NUM_WORKERS:-16}"
-MUSIQUE_NUM_WORKERS="${MUSIQUE_NUM_WORKERS:-16}"
-BAMBOOGLE_NUM_WORKERS="${BAMBOOGLE_NUM_WORKERS:-16}"
+NUM_WORKERS="${NUM_WORKERS:-128}"
+NQ_NUM_WORKERS="${NQ_NUM_WORKERS:-128}"
+TRIVIAQA_NUM_WORKERS="${TRIVIAQA_NUM_WORKERS:-128}"
+POPQA_NUM_WORKERS="${POPQA_NUM_WORKERS:-128}"
+HOTPOT_NUM_WORKERS="${HOTPOT_NUM_WORKERS:-128}"
+TWOWIKI_NUM_WORKERS="${TWOWIKI_NUM_WORKERS:-128}"
+MUSIQUE_NUM_WORKERS="${MUSIQUE_NUM_WORKERS:-128}"
+BAMBOOGLE_NUM_WORKERS="${BAMBOOGLE_NUM_WORKERS:-128}"
 VLLM_BASE_URL="${VLLM_BASE_URL:-}"
+TOOL_SERVER_BASE_URL="${TOOL_SERVER_BASE_URL:-}"
+ENV_URL="${ENV_URL:-}"
+BROWSER_URL="${BROWSER_URL:-http://localhost:22015/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing}"
+COMPRESSION_FACTOR="${COMPRESSION_FACTOR:-1.2}"
+IMAGE_MAX_WIDTH="${IMAGE_MAX_WIDTH:-2048}"
+IMAGE_MAX_HEIGHT="${IMAGE_MAX_HEIGHT:-2048}"
+MAX_STEPS="${MAX_STEPS:-30}"
+MAX_TOKENS="${MAX_TOKENS:-1024}"
+LLM_REQUEST_TIMEOUT="${LLM_REQUEST_TIMEOUT:-300}"
+PIPELINE_ENV_REQUEST_TIMEOUT="${PIPELINE_ENV_REQUEST_TIMEOUT:-300}"
+TEMPERATURE="${TEMPERATURE:-0.3}"
+RUN_TOKEN_STATS="${RUN_TOKEN_STATS:-1}"
+TOKEN_STATS_MODEL_PATH="${TOKEN_STATS_MODEL_PATH:-}"
 USE_VLM="${USE_VLM:-1}"
 KEEP_SERVICES="${KEEP_SERVICES:-0}"
 DRY_RUN="${DRY_RUN:-0}"
+RESUME="${RESUME:-1}"
 
 VLLM_PID=""
 TOOL_SERVER_PID=""
 BENCHMARKS=()
+EVAL_TOTAL_SECONDS=0
+EVAL_TOTAL_COMPLETED=0
+EVAL_BENCHMARK_COUNT=0
 
 usage() {
     cat <<'EOF'
@@ -114,13 +135,13 @@ Common options:
       --bamboogle-num-trials N    Trial count for bamboogle. Default: 4.
       --triviaqa-num-trials N     Trial count for triviaqa. Default: 1.
       --num-workers N             Override pipeline parallelism for all benchmarks.
-      --nq-num-workers N          Pipeline workers for nq. Default: 16.
-      --popqa-num-workers N       Pipeline workers for popqa. Default: 16.
-      --hotpot-num-workers N      Pipeline workers for hotpot. Default: 16.
-      --2wiki-num-workers N       Pipeline workers for 2wiki. Default: 16.
-      --musique-num-workers N     Pipeline workers for musique. Default: 16.
-      --bamboogle-num-workers N   Pipeline workers for bamboogle. Default: 16.
-      --triviaqa-num-workers N    Pipeline workers for triviaqa. Default: 16.
+      --nq-num-workers N          Pipeline workers for nq. Default: 128.
+      --popqa-num-workers N       Pipeline workers for popqa. Default: 128.
+      --hotpot-num-workers N      Pipeline workers for hotpot. Default: 128.
+      --2wiki-num-workers N       Pipeline workers for 2wiki. Default: 128.
+      --musique-num-workers N     Pipeline workers for musique. Default: 128.
+      --bamboogle-num-workers N   Pipeline workers for bamboogle. Default: 128.
+      --triviaqa-num-workers N    Pipeline workers for triviaqa. Default: 128.
       --nq-data-path PATH         NQ parquet path.
       --triviaqa-data-path PATH    TriviaQA parquet path.
       --popqa-data-path PATH      PopQA parquet path.
@@ -130,7 +151,17 @@ Common options:
       --bamboogle-data-path PATH  Bamboogle parquet path.
       --base-url URL              OpenAI-compatible vLLM API base URL.
       --pipeline-python PATH      Python executable for gen_seq.pipeline.
+      --compression-factor VALUE VTC image compression ratio. Default: 1.2.
+      --max-steps N               Maximum browser steps per trajectory. Default: 30.
+      --max-tokens N              Maximum generated tokens per step. Default: 1024.
+      --env-url URL               Full tool observation endpoint. Derived from tool port by default.
+      --browser-url URL           Kiwix landing URL passed to the browser environment.
+      --llm-request-timeout SEC   Pipeline-to-vLLM timeout. Default: 300.
+      --env-request-timeout SEC   Pipeline-to-tool-server timeout. Default: 300.
+      --token-stats-model-path DIR  Local tokenizer/processor used for token counting.
+      --no-token-stats            Skip post-evaluation compressed/raw token counting.
       --no-use-vlm                Do not pass --use_vlm to gen_seq.pipeline.
+      --no-resume                 Re-run all samples instead of skipping existing results.
 
 vLLM options:
       --model-path DIR            Model directory served by vLLM.
@@ -148,7 +179,14 @@ vLLM options:
       --no-clean-triton-cache     Do not remove ~/.triton/cache before starting vLLM.
 
 Tool-server options:
-      --skip-tool-server          Use an already running tool-server on port 5000.
+      --tool-server-port PORT     Tool server port; pipeline endpoint follows it.
+      --tool-workers N            Workers per tool. Default: 128.
+      --tool-max-requests N       Maximum concurrent tool requests. Default: 128.
+      --tool-thread-pool-size N   Tool server thread pool size. Default: 128.
+      --browser-max-actors N      Maximum active Ray browser actors. Default: 128.
+      --browser-idle-pool N       Warm idle browser actors. Default: 16.
+      --browser-ray-cpus N        Ray CPU budget for text browser actors.
+      --skip-tool-server          Use an already running tool-server.
       --tool-ready-timeout SEC
       --tool-server-python PATH
 
@@ -386,8 +424,56 @@ parse_args() {
                 PIPELINE_PYTHON="$2"
                 shift 2
                 ;;
+            --compression-factor)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                COMPRESSION_FACTOR="$2"
+                shift 2
+                ;;
+            --max-steps)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                MAX_STEPS="$2"
+                shift 2
+                ;;
+            --max-tokens)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                MAX_TOKENS="$2"
+                shift 2
+                ;;
+            --env-url)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                ENV_URL="$2"
+                shift 2
+                ;;
+            --browser-url)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                BROWSER_URL="$2"
+                shift 2
+                ;;
+            --llm-request-timeout)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                LLM_REQUEST_TIMEOUT="$2"
+                shift 2
+                ;;
+            --env-request-timeout)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                PIPELINE_ENV_REQUEST_TIMEOUT="$2"
+                shift 2
+                ;;
+            --token-stats-model-path)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                TOKEN_STATS_MODEL_PATH="$2"
+                shift 2
+                ;;
+            --no-token-stats)
+                RUN_TOKEN_STATS=0
+                shift
+                ;;
             --no-use-vlm)
                 USE_VLM=0
+                shift
+                ;;
+            --no-resume)
+                RESUME=0
                 shift
                 ;;
             --model-path|--model-dir)
@@ -463,6 +549,41 @@ parse_args() {
                 START_TOOL_SERVER=0
                 shift
                 ;;
+            --tool-server-port)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                TOOL_SERVER_PORT="$2"
+                shift 2
+                ;;
+            --tool-workers)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                TOOL_SERVER_WORKERS_PER_TOOL="$2"
+                shift 2
+                ;;
+            --tool-max-requests)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                TOOL_SERVER_MAX_CONCURRENT_REQUESTS="$2"
+                shift 2
+                ;;
+            --tool-thread-pool-size)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                TOOL_SERVER_THREAD_POOL_SIZE="$2"
+                shift 2
+                ;;
+            --browser-max-actors)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                TEXT_BROWSER_MAX_ACTIVE_ACTORS="$2"
+                shift 2
+                ;;
+            --browser-idle-pool)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                TEXT_BROWSER_IDLE_POOL_SIZE="$2"
+                shift 2
+                ;;
+            --browser-ray-cpus)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                TEXT_BROWSER_RAY_NUM_CPUS="$2"
+                shift 2
+                ;;
             --tool-ready-timeout|--tool-server-ready-timeout)
                 [[ $# -ge 2 ]] || die "$1 requires a value."
                 TOOL_SERVER_READY_TIMEOUT="$2"
@@ -505,13 +626,18 @@ parse_args() {
         VLLM_HEALTH_URL="http://127.0.0.1:${VLLM_PORT}/v1/models"
     fi
     TOOL_SERVER_HEALTH_URL="http://127.0.0.1:${TOOL_SERVER_PORT}/health"
+    if [[ -z "${TOOL_SERVER_BASE_URL}" ]]; then
+        TOOL_SERVER_BASE_URL="http://127.0.0.1:${TOOL_SERVER_PORT}"
+    fi
+    if [[ -z "${ENV_URL}" ]]; then
+        ENV_URL="${TOOL_SERVER_BASE_URL%/}/get_observation"
+    fi
+    if [[ -z "${TOKEN_STATS_MODEL_PATH}" ]]; then
+        TOKEN_STATS_MODEL_PATH="${VLLM_MODEL_PATH}"
+    fi
 }
 
 validate_config() {
-    if [[ "${TOOL_SERVER_PORT}" != "5000" ]]; then
-        die "gen_seq.pipeline currently hardcodes http://localhost:5000/get_observation; keep TOOL_SERVER_PORT=5000."
-    fi
-
     if [[ "${DRY_RUN}" != "1" ]]; then
         [[ -f "${PROMPT_PATH}" ]] || die "Missing prompt file: ${PROMPT_PATH}"
 
@@ -531,6 +657,12 @@ validate_config() {
     [[ -x "${PIPELINE_PYTHON}" || -n "$(command -v "${PIPELINE_PYTHON}" 2>/dev/null)" ]] || die "Pipeline python not found: ${PIPELINE_PYTHON}"
     if [[ "${START_TOOL_SERVER}" == "1" ]]; then
         [[ -x "${TOOL_SERVER_PYTHON}" || -n "$(command -v "${TOOL_SERVER_PYTHON}" 2>/dev/null)" ]] || die "Tool-server python not found: ${TOOL_SERVER_PYTHON}"
+        if [[ "${DRY_RUN}" != "1" && "${MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY}" == "1" ]]; then
+            [[ -f "${MINI_WEB_ARENA_PROMPT_MODEL}/tokenizer.json" ]] || die "Missing local prompt tokenizer: ${MINI_WEB_ARENA_PROMPT_MODEL}/tokenizer.json"
+        fi
+    fi
+    if [[ "${RUN_TOKEN_STATS}" == "1" && "${DRY_RUN}" != "1" ]]; then
+        [[ -d "${TOKEN_STATS_MODEL_PATH}" ]] || die "Missing token-stats model directory: ${TOKEN_STATS_MODEL_PATH}"
     fi
 }
 
@@ -625,8 +757,11 @@ export_runtime_config() {
     export TOOL_SERVER_PYTHON TOOL_SERVER_PORT TOOL_SERVER_WORKERS_PER_TOOL
     export TOOL_SERVER_MAX_CONCURRENT_REQUESTS TOOL_SERVER_THREAD_POOL_SIZE
     export TOOL_SERVER_REQUEST_TIMEOUT TOOL_SERVER_UVI_WORKERS TOOL_SERVER_ROUTER_WORKERS
-    export TEXT_BROWSER_RAY_NUM_CPUS TEXT_BROWSER_ACTION_TIMEOUT_SEC
+    export TEXT_BROWSER_RAY_NUM_CPUS TEXT_BROWSER_MAX_ACTIVE_ACTORS
+    export TEXT_BROWSER_IDLE_POOL_SIZE TEXT_BROWSER_ACTOR_CPUS
+    export TEXT_BROWSER_ACTION_TIMEOUT_SEC
     export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC VT_HEALTH_CHECK_TIMEOUT
+    export MINI_WEB_ARENA_PROMPT_MODEL MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY
 }
 
 start_vllm() {
@@ -698,6 +833,23 @@ benchmark_workers() {
     esac
 }
 
+count_jsonl_records() {
+    local file_path="$1"
+    if [[ ! -f "${file_path}" ]]; then
+        printf '0\n'
+        return 0
+    fi
+    awk 'NF { count++ } END { print count + 0 }' "${file_path}"
+}
+
+format_seconds() {
+    local total_seconds="$1"
+    printf '%02d:%02d:%02d' \
+        "$((total_seconds / 3600))" \
+        "$(((total_seconds % 3600) / 60))" \
+        "$((total_seconds % 60))"
+}
+
 run_benchmark() {
     local bench="$1"
     local data_path
@@ -706,6 +858,16 @@ run_benchmark() {
     local output_file
     local image_output_dir
     local cmd
+    local records_before
+    local records_after
+    local completed_records
+    local start_ts
+    local end_ts
+    local elapsed_seconds
+    local duration
+    local samples_per_second
+    local seconds_per_sample
+    local pipeline_status
 
     data_path="$(benchmark_data_path "${bench}")"
     trials="$(benchmark_trials "${bench}")"
@@ -725,23 +887,71 @@ run_benchmark() {
         --num_trials "${trials}"
         --base_url "${VLLM_BASE_URL}"
         --model "${VLLM_SERVED_MODEL_NAME}"
+        --env-url "${ENV_URL}"
+        --browser-url "${BROWSER_URL}"
+        --compression-factor "${COMPRESSION_FACTOR}"
+        --image-max-width "${IMAGE_MAX_WIDTH}"
+        --image-max-height "${IMAGE_MAX_HEIGHT}"
+        --max-steps "${MAX_STEPS}"
+        --max-tokens "${MAX_TOKENS}"
+        --temperature "${TEMPERATURE}"
+        --llm-request-timeout "${LLM_REQUEST_TIMEOUT}"
+        --env-request-timeout "${PIPELINE_ENV_REQUEST_TIMEOUT}"
         --image_output_dir "${image_output_dir}"
         --num_workers "${workers}"
     )
     if [[ "${USE_VLM}" == "1" ]]; then
         cmd+=(--use_vlm)
     fi
+    if [[ "${RESUME}" == "1" ]]; then
+        cmd+=(--resume)
+    fi
 
-    log "Running benchmark=${bench}, trials=${trials}, workers=${workers}, max_samples=${MAX_SAMPLES}, sample_seed=${SAMPLE_SEED:-sequential}"
+    log "Running benchmark=${bench}, trials=${trials}, workers=${workers}, max_samples=${MAX_SAMPLES}, sample_seed=${SAMPLE_SEED:-sequential}, compression_factor=${COMPRESSION_FACTOR}"
     log "Pipeline command: $(quote_cmd "${cmd[@]}")"
     if [[ "${DRY_RUN}" == "1" ]]; then
         return 0
     fi
 
-    (
+    records_before="$(count_jsonl_records "${output_file}")"
+    start_ts="$(date +%s)"
+    if (
         cd "${ROOT_DIR}"
         "${cmd[@]}"
-    ) 2>&1 | tee -a "${RUN_LOG}"
+    ) 2>&1 | tee -a "${RUN_LOG}"; then
+        pipeline_status=0
+    else
+        pipeline_status=$?
+    fi
+    end_ts="$(date +%s)"
+    elapsed_seconds=$((end_ts - start_ts))
+    records_after="$(count_jsonl_records "${output_file}")"
+    completed_records=$((records_after - records_before))
+    if (( completed_records < 0 )); then
+        completed_records=0
+    fi
+    duration="$(format_seconds "${elapsed_seconds}")"
+
+    if (( elapsed_seconds > 0 )); then
+        samples_per_second="$(awk -v count="${completed_records}" -v seconds="${elapsed_seconds}" 'BEGIN { printf "%.4f", count / seconds }')"
+    else
+        samples_per_second="0.0000"
+    fi
+    if (( completed_records > 0 )); then
+        seconds_per_sample="$(awk -v count="${completed_records}" -v seconds="${elapsed_seconds}" 'BEGIN { printf "%.4f", seconds / count }')"
+    else
+        seconds_per_sample="n/a"
+    fi
+
+    EVAL_TOTAL_SECONDS=$((EVAL_TOTAL_SECONDS + elapsed_seconds))
+    EVAL_TOTAL_COMPLETED=$((EVAL_TOTAL_COMPLETED + completed_records))
+    EVAL_BENCHMARK_COUNT=$((EVAL_BENCHMARK_COUNT + 1))
+    log "BENCHMARK_TIMING benchmark=${bench} duration=${duration} elapsed_seconds=${elapsed_seconds} completed_sample_evals=${completed_records} avg_sample_evals_per_second=${samples_per_second} avg_seconds_per_sample_eval=${seconds_per_sample}"
+
+    if (( pipeline_status != 0 )); then
+        log "Benchmark failed: ${bench}, exit_code=${pipeline_status}"
+        return "${pipeline_status}"
+    fi
     log "Benchmark finished: ${bench}"
 }
 
@@ -785,13 +995,18 @@ PYVLLM
 internal_run_tool_server() {
     cd "${ROOT_DIR}"
 
-    export PYTHONPATH="${PYTHONPATH:-}:/home/nvidia/yutao/lzt/BrowserAgent_v2:${ROOT_DIR}:${ROOT_DIR}/verl-tool"
+    export PYTHONPATH="${PYTHONPATH:-}:${ROOT_DIR}:${ROOT_DIR}/verl-tool"
     unset http_proxy https_proxy all_proxy
 
     export TEXT_BROWSER_RAY_NUM_CPUS
+    export TEXT_BROWSER_MAX_ACTIVE_ACTORS
+    export TEXT_BROWSER_IDLE_POOL_SIZE
+    export TEXT_BROWSER_ACTOR_CPUS
     export TEXT_BROWSER_ACTION_TIMEOUT_SEC
     export TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC
     export VT_HEALTH_CHECK_TIMEOUT
+    export MINI_WEB_ARENA_PROMPT_MODEL
+    export MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY
 
     exec "${TOOL_SERVER_PYTHON}" -m verl_tool.servers.serve \
         --tool_type text_browser \
@@ -805,6 +1020,31 @@ internal_run_tool_server() {
         --request_timeout "${TOOL_SERVER_REQUEST_TIMEOUT}"
 }
 
+run_token_stats() {
+    local output_json="${OUTPUT_DIR}/token_usage_summary.json"
+    local output_csv="${OUTPUT_DIR}/token_usage_by_benchmark.csv"
+    local cmd=(
+        "${PIPELINE_PYTHON}" -m gen_seq.token_stats
+        --input "${OUTPUT_DIR}"
+        --glob "*_test_results.jsonl"
+        --model_path "${TOKEN_STATS_MODEL_PATH}"
+        --system_prompt "${PROMPT_PATH}"
+        --output_json "${output_json}"
+        --output_csv "${output_csv}"
+        --vtc_compression_factor "${COMPRESSION_FACTOR}"
+    )
+
+    log "Token stats command: $(quote_cmd "${cmd[@]}")"
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        return 0
+    fi
+    (
+        cd "${ROOT_DIR}"
+        "${cmd[@]}"
+    ) 2>&1 | tee -a "${RUN_LOG}"
+    log "Token usage summary: ${output_json}"
+}
+
 main() {
     mkdir -p "${LOG_DIR}"
     parse_args "$@"
@@ -815,6 +1055,9 @@ main() {
     log "Selected benchmarks: ${BENCHMARKS[*]}"
     log "Output dir: ${OUTPUT_DIR}"
     log "vLLM model path: ${VLLM_MODEL_PATH}"
+    log "Pipeline config: env_url=${ENV_URL}, vllm_url=${VLLM_BASE_URL}, compression_factor=${COMPRESSION_FACTOR}, max_steps=${MAX_STEPS}, max_tokens=${MAX_TOKENS}, token_stats=${RUN_TOKEN_STATS}"
+    log "Concurrency: pipeline_workers=${NUM_WORKERS}, tool_workers=${TOOL_SERVER_WORKERS_PER_TOOL}, tool_max_requests=${TOOL_SERVER_MAX_CONCURRENT_REQUESTS}, tool_thread_pool=${TOOL_SERVER_THREAD_POOL_SIZE}, browser_max_actors=${TEXT_BROWSER_MAX_ACTIVE_ACTORS}, browser_idle_pool=${TEXT_BROWSER_IDLE_POOL_SIZE}, browser_actor_cpus=${TEXT_BROWSER_ACTOR_CPUS}"
+    log "Timeouts: env_rpc=${TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC}s, browser_action=${TEXT_BROWSER_ACTION_TIMEOUT_SEC}s, tool_request=${TOOL_SERVER_REQUEST_TIMEOUT}s; prompt_tokenizer=${MINI_WEB_ARENA_PROMPT_MODEL}, local_only=${MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY}"
 
     if [[ "${START_VLLM}" == "1" ]]; then
         start_vllm
@@ -838,6 +1081,28 @@ main() {
     for bench in "${BENCHMARKS[@]}"; do
         run_benchmark "${bench}"
     done
+
+    local total_duration
+    local overall_samples_per_second
+    local overall_seconds_per_sample
+    total_duration="$(format_seconds "${EVAL_TOTAL_SECONDS}")"
+    if (( EVAL_TOTAL_SECONDS > 0 )); then
+        overall_samples_per_second="$(awk -v count="${EVAL_TOTAL_COMPLETED}" -v seconds="${EVAL_TOTAL_SECONDS}" 'BEGIN { printf "%.4f", count / seconds }')"
+    else
+        overall_samples_per_second="0.0000"
+    fi
+    if (( EVAL_TOTAL_COMPLETED > 0 )); then
+        overall_seconds_per_sample="$(awk -v count="${EVAL_TOTAL_COMPLETED}" -v seconds="${EVAL_TOTAL_SECONDS}" 'BEGIN { printf "%.4f", seconds / count }')"
+    else
+        overall_seconds_per_sample="n/a"
+    fi
+    log "EVALUATION_TIMING_SUMMARY benchmarks=${EVAL_BENCHMARK_COUNT} duration=${total_duration} elapsed_seconds=${EVAL_TOTAL_SECONDS} completed_sample_evals=${EVAL_TOTAL_COMPLETED} avg_sample_evals_per_second=${overall_samples_per_second} avg_seconds_per_sample_eval=${overall_seconds_per_sample}"
+
+    if [[ "${RUN_TOKEN_STATS}" == "1" ]]; then
+        run_token_stats
+    else
+        log "Skipping token statistics by request."
+    fi
 }
 
 case "${1:-}" in

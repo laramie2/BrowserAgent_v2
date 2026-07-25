@@ -20,6 +20,7 @@ from .browser_actions import (
     create_playwright_action,
 )
 from .browser_env import ScriptBrowserEnv, Trajectory
+from .prompt_model import DEFAULT_PROMPT_MODEL
 # from .browser_env_async import AsyncScriptBrowserEnv
 
 class WikiQAEnv(BaseLanguageBasedEnv):
@@ -105,7 +106,9 @@ class WikiQAEnv(BaseLanguageBasedEnv):
 
         # print("[DEBUG] WikiQAEnv init Checkpoint 5")
         from .agent import construct_promptConstructor
-        self.prompt_constructor, self.tokenizer, _ = construct_promptConstructor("Qwen/Qwen2.5-14B-Instruct", None)
+        self.prompt_constructor, self.tokenizer, _ = construct_promptConstructor(
+            DEFAULT_PROMPT_MODEL, None
+        )
         self.url = "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
 
         # print("[DEBUG] WikiQAEnv init Checkpoint 6")

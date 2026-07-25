@@ -20,10 +20,10 @@ from .browser_actions import (
     create_playwright_action,
 )
 from .browser_env import ScriptBrowserEnv
+from .prompt_model import DEFAULT_PROMPT_MODEL
 
 
 DEFAULT_BROWSER_URL = "https://tigerai.ca/wiki/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
-DEFAULT_PROMPT_MODEL = os.getenv("MINI_WEB_ARENA_PROMPT_MODEL", "Qwen/Qwen2.5-14B-Instruct")
 DEFAULT_KIWIX_ENTRY_PATH = "/wikipedia_en_all_maxi_2022-05/A/User:The_other_Kiwix_guy/Landing"
 
 logger = logging.getLogger(__name__)

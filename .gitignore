@@ -25,6 +25,7 @@ sft/done
 *.tar.gz
 *.pkl
 .worktrees/
+gen_seq/results/
 
 # Offline assets intentionally bundled for command-line training setup.
 !wiki_cluster/tools/kiwix-tools_linux-x86_64-3.3.0.tar.gz

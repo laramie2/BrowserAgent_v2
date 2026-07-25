@@ -1,0 +1,43 @@
+{
+  "name": "machine_gpu01_mixed_queue",
+  "defaults": {
+    "num_workers": 128,
+    "resume": true,
+    "env": {
+      "PIPELINE_PYTHON": "${PIPELINE_PYTHON}",
+      "TOOL_SERVER_PYTHON": "${TOOL_SERVER_PYTHON}",
+      "VLLM_PYTHON": "${VLLM_PYTHON}",
+      "MINI_WEB_ARENA_PROMPT_MODEL": "${MINI_WEB_ARENA_PROMPT_MODEL}",
+      "MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY": "1",
+      "TOKEN_STATS_MODEL_PATH": "${TOKEN_STATS_MODEL_PATH}"
+    },
+    "extra_args": [
+      "--vllm-cuda-devices", "0,1",
+      "--vllm-tensor-parallel-size", "2",
+      "--tool-workers", "128",
+      "--tool-max-requests", "128",
+      "--browser-max-actors", "128",
+      "--browser-ray-cpus", "128"
+    ]
+  },
+  "jobs": [
+    {
+      "job_id": "sft_compression_1_2",
+      "group": "compression_ablation",
+      "experiment": "ratio_1_2",
+      "model_path": "${MODEL_ROOT}/sft-compression-1.2-merged"
+    },
+    {
+      "job_id": "sft_compression_1_4",
+      "group": "compression_ablation",
+      "experiment": "ratio_1_4",
+      "model_path": "${MODEL_ROOT}/sft-compression-1.4-merged"
+    },
+    {
+      "job_id": "rl_without_dense_reward",
+      "group": "rl_ablation",
+      "experiment": "wo_dense_reward",
+      "model_path": "${MODEL_ROOT}/rl-without-dense-reward-merged"
+    }
+  ]
+}

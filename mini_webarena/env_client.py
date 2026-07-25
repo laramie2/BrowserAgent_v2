@@ -11,6 +11,7 @@ from copy import deepcopy
 from typing import Optional, Tuple, Dict, Any
 import numpy as np
 import pandas as pd
+from .prompt_model import DEFAULT_PROMPT_MODEL
 
 # ------------------ 这里是client的HTTP请求封装，可直接使用 ------------------
 def client_start(server_url, questions, gts, keys):
@@ -140,7 +141,7 @@ class WikiQAEnv(BaseLanguageBasedEnv):
 
         # 用于解析大模型输出动作
         self.prompt_constructor, self.tokenizer, _ = construct_promptConstructor(
-            "Qwen/Qwen2.5-14B-Instruct", None
+            DEFAULT_PROMPT_MODEL, None
         )
 
         # 用于给服务端启动浏览器时的初始 index
