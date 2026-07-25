@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import fcntl
 import hashlib
 import json
@@ -13,6 +14,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from string import Template
 from typing import Any
 
 
@@ -40,13 +42,17 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def expand(value: Any) -> Any:
+def expand(
+    value: Any,
+    variables: Mapping[str, Any] | None = None,
+) -> Any:
+    substitutions = os.environ if variables is None else variables
     if isinstance(value, str):
-        return os.path.expanduser(os.path.expandvars(value))
+        return os.path.expanduser(Template(value).safe_substitute(substitutions))
     if isinstance(value, list):
-        return [expand(item) for item in value]
+        return [expand(item, substitutions) for item in value]
     if isinstance(value, dict):
-        return {key: expand(item) for key, item in value.items()}
+        return {key: expand(item, substitutions) for key, item in value.items()}
     return value
 
 
@@ -55,6 +61,26 @@ def merge(*values: dict[str, Any]) -> dict[str, Any]:
     for value in values:
         result.update(value)
     return result
+
+
+def resolve_environment(*values: dict[str, Any]) -> dict[str, Any]:
+    raw = merge(*values)
+    if not all(isinstance(key, str) for key in raw):
+        raise ValueError("env keys must be strings")
+
+    # Resolve the launching shell first, then allow queue variables to refer to
+    # one another (for example MODEL_ROOT used by a job's model_path).
+    resolved = expand(raw, os.environ)
+    for _ in range(len(raw) + 1):
+        variables = {
+            **os.environ,
+            **{key: str(value) for key, value in resolved.items()},
+        }
+        updated = expand(resolved, variables)
+        if updated == resolved:
+            break
+        resolved = updated
+    return resolved
 
 
 def atomic_json(path: Path, value: dict[str, Any]) -> None:
@@ -128,7 +154,16 @@ def load_jobs(
             raise ValueError(f"Duplicate job_id: {job_id}")
         job_ids.add(job_id)
 
-        settings = expand(merge(base, queue_defaults, entry))
+        environments = resolve_environment(
+            base.get("env", {}),
+            queue_defaults.get("env", {}),
+            entry.get("env", {}),
+        )
+        variables = {
+            **os.environ,
+            **{key: str(value) for key, value in environments.items()},
+        }
+        settings = expand(merge(base, queue_defaults, entry), variables)
         model_path = str(settings.get("model_path", ""))
         if not model_path or "$" in model_path:
             raise ValueError(f"{job_id}: model_path is empty or has an unset variable")
@@ -138,26 +173,27 @@ def load_jobs(
         if not isinstance(benchmarks, list) or not benchmarks:
             raise ValueError(f"{job_id}: benchmarks must be a non-empty list")
 
-        extra_args = [
-            *string_list(base.get("extra_args"), f"{job_id} matrix extra_args"),
-            *string_list(queue_defaults.get("extra_args"), "queue defaults extra_args"),
-            *string_list(entry.get("extra_args"), f"{job_id} extra_args"),
-        ]
-        environments = merge(
-            base.get("env", {}),
-            queue_defaults.get("env", {}),
-            entry.get("env", {}),
+        extra_args = expand(
+            [
+                *string_list(base.get("extra_args"), f"{job_id} matrix extra_args"),
+                *string_list(
+                    queue_defaults.get("extra_args"),
+                    "queue defaults extra_args",
+                ),
+                *string_list(
+                    entry.get("extra_args"),
+                    f"{job_id} extra_args",
+                ),
+            ],
+            variables,
         )
-        if not all(isinstance(key, str) for key in environments):
-            raise ValueError(f"{job_id}: env keys must be strings")
-        environments = expand(environments)
         for key, value in environments.items():
             if "$" in str(value):
                 raise ValueError(f"{job_id}: env.{key} has an unset variable")
 
         output_value = entry.get("output_dir")
         if output_value:
-            output_dir = Path(expand(str(output_value)))
+            output_dir = Path(expand(str(output_value), variables))
             if not output_dir.is_absolute():
                 output_dir = ROOT / output_dir
         else:
@@ -254,6 +290,16 @@ def command_for(job: dict[str, Any], dry_run: bool, cli_args: list[str]) -> list
         "--num-workers", str(settings["num_workers"]),
         "--compression-factor", str(settings["compression_factor"]),
     ]
+    if "benchmark_max_retries" in settings:
+        command.extend([
+            "--benchmark-max-retries",
+            str(settings["benchmark_max_retries"]),
+        ])
+    if "benchmark_retry_delay" in settings:
+        command.extend([
+            "--benchmark-retry-delay",
+            str(settings["benchmark_retry_delay"]),
+        ])
     if not settings.get("resume", True):
         command.append("--no-resume")
     if dry_run:

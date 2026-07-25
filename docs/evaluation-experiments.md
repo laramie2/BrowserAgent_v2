@@ -125,6 +125,19 @@ python scripts/run_eval_queue.py \
 
 For every job, `run_eval_all.sh` starts the selected model, evaluates it, computes token statistics, and stops its vLLM/tool-server process groups before the next job starts. Do not add `--skip-vllm` to a multi-model queue.
 
+A benchmark that exits with code `2` has unsaved environment/request failures. The runner now keeps the healthy vLLM process, restarts the tool server and its Ray runtime, and resumes the benchmark from its JSONL automatically. It retries five times by default. Code/configuration failures with other exit codes fail immediately instead of being hidden. Override the policy per queue or per job when needed:
+
+```json
+{
+  "benchmark_max_retries": 8,
+  "benchmark_retry_delay": 10
+}
+```
+
+Set `benchmark_max_retries` to `0` to disable automatic retries. `--no-resume` automatically disables retries, because retrying without resume would duplicate experimental work. Every attempt is included in timing and throughput totals, while the completed benchmark count is incremented only once.
+
+The runner uses a short, run-specific Ray directory under `/tmp` by default to stay below the Unix socket path limit. `RAY_TMPDIR_OVERRIDE` remains available when a machine needs a specific short location. Queue-defined environment variables may reference one another, so `model_path: "${MODEL_ROOT}/model"` works when `MODEL_ROOT` is declared in `defaults.env`.
+
 Queue state is written atomically to:
 
 ```text

@@ -2,10 +2,10 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export RAY_TMPDIR="${RAY_TMPDIR_OVERRIDE:-${ROOT_DIR}/.ray_tmp}"
+RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
+export RAY_TMPDIR="${RAY_TMPDIR_OVERRIDE:-${RAY_TMPDIR:-/tmp/ba-ray-$(id -u)-${RUN_ID}}}"
 SCRIPT_PATH="${ROOT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 LOG_DIR="${ROOT_DIR}/logs"
-RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
 RUN_LOG="${LOG_DIR}/eval_runner_${RUN_ID}.log"
 
 DEFAULT_MODEL_PATH="${ROOT_DIR}/sft/output/Qwen2.5-VL-7B-Instruct-task-opsrc-hotpot5459-nq6318-sft-5e-5lr-freeze_false-2epoch-merged"
@@ -106,9 +106,12 @@ USE_VLM="${USE_VLM:-1}"
 KEEP_SERVICES="${KEEP_SERVICES:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 RESUME="${RESUME:-1}"
+BENCHMARK_MAX_RETRIES="${BENCHMARK_MAX_RETRIES:-5}"
+BENCHMARK_RETRY_DELAY_SEC="${BENCHMARK_RETRY_DELAY_SEC:-5}"
 
 VLLM_PID=""
 TOOL_SERVER_PID=""
+TOOL_SERVER_START_COUNT=0
 BENCHMARKS=()
 EVAL_TOTAL_SECONDS=0
 EVAL_TOTAL_COMPLETED=0
@@ -162,6 +165,8 @@ Common options:
       --no-token-stats            Skip post-evaluation compressed/raw token counting.
       --no-use-vlm                Do not pass --use_vlm to gen_seq.pipeline.
       --no-resume                 Re-run all samples instead of skipping existing results.
+      --benchmark-max-retries N    Resume a benchmark after exit code 2. Default: 5.
+      --benchmark-retry-delay SEC  Delay before an automatic retry. Default: 5.
 
 vLLM options:
       --model-path DIR            Model directory served by vLLM.
@@ -476,6 +481,16 @@ parse_args() {
                 RESUME=0
                 shift
                 ;;
+            --benchmark-max-retries)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                BENCHMARK_MAX_RETRIES="$2"
+                shift 2
+                ;;
+            --benchmark-retry-delay)
+                [[ $# -ge 2 ]] || die "$1 requires a value."
+                BENCHMARK_RETRY_DELAY_SEC="$2"
+                shift 2
+                ;;
             --model-path|--model-dir)
                 [[ $# -ge 2 ]] || die "$1 requires a value."
                 VLLM_MODEL_PATH="$2"
@@ -638,6 +653,13 @@ parse_args() {
 }
 
 validate_config() {
+    [[ "${BENCHMARK_MAX_RETRIES}" =~ ^[0-9]+$ ]] || die "--benchmark-max-retries must be a non-negative integer."
+    [[ "${BENCHMARK_RETRY_DELAY_SEC}" =~ ^[0-9]+$ ]] || die "--benchmark-retry-delay must be a non-negative integer."
+    if [[ "${RESUME}" != "1" && "${BENCHMARK_MAX_RETRIES}" != "0" ]]; then
+        log "Automatic benchmark retries disabled because resume is disabled"
+        BENCHMARK_MAX_RETRIES=0
+    fi
+
     if [[ "${DRY_RUN}" != "1" ]]; then
         [[ -f "${PROMPT_PATH}" ]] || die "Missing prompt file: ${PROMPT_PATH}"
 
@@ -682,13 +704,15 @@ wait_for_http() {
 
     start_ts="$(date +%s)"
     while true; do
+        # Check the process before the endpoint. Otherwise an old service on the
+        # same port can be mistaken for the process that was just launched.
+        if [[ -n "${pid}" ]] && ! kill -0 "${pid}" 2>/dev/null; then
+            die "${name} process exited before becoming ready. Check ${RUN_LOG} and service logs under ${LOG_DIR}."
+        fi
+
         if http_ok "${url}"; then
             log "${name} is ready: ${url}"
             return 0
-        fi
-
-        if [[ -n "${pid}" ]] && ! kill -0 "${pid}" 2>/dev/null; then
-            die "${name} process exited before becoming ready. Check ${RUN_LOG} and service logs under ${LOG_DIR}."
         fi
 
         now_ts="$(date +%s)"
@@ -704,21 +728,28 @@ wait_for_http() {
     done
 }
 
+process_group_exists() {
+    local pid="$1"
+    ps -eo pgid=,stat= | awk -v target="${pid}" '
+        $1 == target && $2 !~ /^Z/ { found = 1 }
+        END { exit(found ? 0 : 1) }
+    '
+}
+
 stop_process_group() {
     local name="$1"
     local pid="$2"
 
     [[ -n "${pid}" ]] || return 0
-    if ! kill -0 "${pid}" 2>/dev/null; then
-        return 0
-    fi
+    process_group_exists "${pid}" || return 0
 
     log "Stopping ${name} process group pid=${pid}"
     kill -TERM "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || true
 
     local i
     for i in {1..20}; do
-        if ! kill -0 "${pid}" 2>/dev/null; then
+        if ! process_group_exists "${pid}"; then
+            wait "${pid}" 2>/dev/null || true
             log "${name} stopped"
             return 0
         fi
@@ -727,6 +758,42 @@ stop_process_group() {
 
     log "${name} did not stop after SIGTERM; sending SIGKILL"
     kill -KILL "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
+    for i in {1..10}; do
+        if ! process_group_exists "${pid}"; then
+            wait "${pid}" 2>/dev/null || true
+            return 0
+        fi
+        sleep 1
+    done
+    log "WARNING: ${name} process group ${pid} still appears alive after SIGKILL"
+}
+
+stop_existing_vllm() {
+    [[ "${DRY_RUN}" != "1" ]] || return 0
+    http_ok "${VLLM_HEALTH_URL}" || return 0
+    if [[ "${KILL_EXISTING_VLLM}" != "1" ]]; then
+        die "A vLLM service is already responding on port ${VLLM_PORT}. Use --skip-vllm to reuse it or allow the runner to replace it."
+    fi
+
+    local pattern="vllm\.entrypoints\.openai\.api_server.*--port([=[:space:]])${VLLM_PORT}([[:space:]]|$)"
+    if ! pgrep -f "${pattern}" >/dev/null 2>&1; then
+        die "Port ${VLLM_PORT} already serves vLLM, but its process could not be identified safely. Stop it explicitly or use --skip-vllm."
+    fi
+
+    log "Stopping existing vLLM service on port ${VLLM_PORT} before model startup"
+    pkill -TERM -f "${pattern}" 2>/dev/null || true
+    local i
+    for i in {1..30}; do
+        http_ok "${VLLM_HEALTH_URL}" || return 0
+        sleep 1
+    done
+    log "Existing vLLM did not stop after SIGTERM; sending SIGKILL"
+    pkill -KILL -f "${pattern}" 2>/dev/null || true
+    for i in {1..10}; do
+        http_ok "${VLLM_HEALTH_URL}" || return 0
+        sleep 1
+    done
+    die "Existing vLLM is still responding on port ${VLLM_PORT}."
 }
 
 cleanup() {
@@ -780,11 +847,19 @@ start_vllm() {
 }
 
 start_tool_server() {
-    local service_log="${LOG_DIR}/tool_server_${RUN_ID}.log"
+    TOOL_SERVER_START_COUNT=$((TOOL_SERVER_START_COUNT + 1))
+    local suffix=""
+    if (( TOOL_SERVER_START_COUNT > 1 )); then
+        suffix="_restart$((TOOL_SERVER_START_COUNT - 1))"
+    fi
+    local service_log="${LOG_DIR}/tool_server_${RUN_ID}${suffix}.log"
 
     if [[ "${DRY_RUN}" == "1" ]]; then
         log "DRY-RUN tool-server: ${SCRIPT_PATH} __run_tool_server"
         return 0
+    fi
+    if http_ok "${TOOL_SERVER_HEALTH_URL}"; then
+        die "A tool-server is already responding on port ${TOOL_SERVER_PORT}. Use --skip-tool-server to reuse it or stop it before this run."
     fi
 
     export_runtime_config
@@ -792,6 +867,21 @@ start_tool_server() {
     setsid bash "${SCRIPT_PATH}" __run_tool_server >"${service_log}" 2>&1 &
     TOOL_SERVER_PID=$!
     log "tool-server started with process-group pid=${TOOL_SERVER_PID}"
+}
+
+restart_tool_server_for_retry() {
+    if [[ "${START_TOOL_SERVER}" != "1" ]]; then
+        log "Tool-server is externally managed; retrying without restarting it"
+        return 0
+    fi
+
+    stop_process_group "tool-server" "${TOOL_SERVER_PID}"
+    TOOL_SERVER_PID=""
+    if http_ok "${TOOL_SERVER_HEALTH_URL}"; then
+        die "Owned tool-server still responds after shutdown; refusing to start a duplicate on port ${TOOL_SERVER_PORT}."
+    fi
+    start_tool_server
+    wait_for_http "tool-server" "${TOOL_SERVER_HEALTH_URL}" "${TOOL_SERVER_READY_TIMEOUT}" "${TOOL_SERVER_PID}"
 }
 
 benchmark_data_path() {
@@ -850,8 +940,9 @@ format_seconds() {
         "$((total_seconds % 60))"
 }
 
-run_benchmark() {
+run_benchmark_once() {
     local bench="$1"
+    local attempt="$2"
     local data_path
     local trials
     local workers
@@ -907,7 +998,7 @@ run_benchmark() {
         cmd+=(--resume)
     fi
 
-    log "Running benchmark=${bench}, trials=${trials}, workers=${workers}, max_samples=${MAX_SAMPLES}, sample_seed=${SAMPLE_SEED:-sequential}, compression_factor=${COMPRESSION_FACTOR}"
+    log "Running benchmark=${bench}, attempt=${attempt}, trials=${trials}, workers=${workers}, max_samples=${MAX_SAMPLES}, sample_seed=${SAMPLE_SEED:-sequential}, compression_factor=${COMPRESSION_FACTOR}"
     log "Pipeline command: $(quote_cmd "${cmd[@]}")"
     if [[ "${DRY_RUN}" == "1" ]]; then
         return 0
@@ -945,23 +1036,55 @@ run_benchmark() {
 
     EVAL_TOTAL_SECONDS=$((EVAL_TOTAL_SECONDS + elapsed_seconds))
     EVAL_TOTAL_COMPLETED=$((EVAL_TOTAL_COMPLETED + completed_records))
-    EVAL_BENCHMARK_COUNT=$((EVAL_BENCHMARK_COUNT + 1))
-    log "BENCHMARK_TIMING benchmark=${bench} duration=${duration} elapsed_seconds=${elapsed_seconds} completed_sample_evals=${completed_records} avg_sample_evals_per_second=${samples_per_second} avg_seconds_per_sample_eval=${seconds_per_sample}"
+    log "BENCHMARK_TIMING benchmark=${bench} attempt=${attempt} duration=${duration} elapsed_seconds=${elapsed_seconds} completed_sample_evals=${completed_records} avg_sample_evals_per_second=${samples_per_second} avg_seconds_per_sample_eval=${seconds_per_sample}"
 
     if (( pipeline_status != 0 )); then
-        log "Benchmark failed: ${bench}, exit_code=${pipeline_status}"
+        log "Benchmark attempt failed: benchmark=${bench}, attempt=${attempt}, exit_code=${pipeline_status}"
         return "${pipeline_status}"
     fi
-    log "Benchmark finished: ${bench}"
+    log "Benchmark finished: ${bench}, attempts=${attempt}"
+}
+
+run_benchmark() {
+    local bench="$1"
+    local attempt=1
+    local max_attempts=$((BENCHMARK_MAX_RETRIES + 1))
+    local status
+
+    while true; do
+        if run_benchmark_once "${bench}" "${attempt}"; then
+            EVAL_BENCHMARK_COUNT=$((EVAL_BENCHMARK_COUNT + 1))
+            return 0
+        else
+            status=$?
+        fi
+
+        if (( status != 2 )); then
+            log "Benchmark ${bench} failed with non-retryable exit code ${status}"
+            return "${status}"
+        fi
+        if [[ "${RESUME}" != "1" ]]; then
+            log "Benchmark ${bench} cannot retry because resume is disabled"
+            return "${status}"
+        fi
+        if (( attempt >= max_attempts )); then
+            log "Benchmark ${bench} exhausted ${BENCHMARK_MAX_RETRIES} automatic retries"
+            return "${status}"
+        fi
+
+        log "AUTO_RETRY benchmark=${bench} failed_attempt=${attempt} next_attempt=$((attempt + 1)) max_attempts=${max_attempts} delay_seconds=${BENCHMARK_RETRY_DELAY_SEC}; preserving vLLM and resuming saved JSONL"
+        if (( BENCHMARK_RETRY_DELAY_SEC > 0 )); then
+            sleep "${BENCHMARK_RETRY_DELAY_SEC}"
+        fi
+        restart_tool_server_for_retry
+        attempt=$((attempt + 1))
+    done
 }
 
 internal_run_vllm() {
     cd "${ROOT_DIR}"
     mkdir -p "${LOG_DIR}"
 
-    if [[ "${KILL_EXISTING_VLLM}" == "1" ]]; then
-        pkill -9 -f "VLLM.*--port ${VLLM_PORT}" 2>/dev/null || true
-    fi
     if [[ "${CLEAN_TRITON_CACHE}" == "1" ]]; then
         rm -rf "${HOME}/.triton/cache"
     fi
@@ -996,7 +1119,7 @@ internal_run_tool_server() {
     cd "${ROOT_DIR}"
 
     export PYTHONPATH="${PYTHONPATH:-}:${ROOT_DIR}:${ROOT_DIR}/verl-tool"
-    unset http_proxy https_proxy all_proxy
+    unset http_proxy https_proxy all_proxy RAY_ADDRESS
 
     export TEXT_BROWSER_RAY_NUM_CPUS
     export TEXT_BROWSER_MAX_ACTIVE_ACTORS
@@ -1057,9 +1180,11 @@ main() {
     log "vLLM model path: ${VLLM_MODEL_PATH}"
     log "Pipeline config: env_url=${ENV_URL}, vllm_url=${VLLM_BASE_URL}, compression_factor=${COMPRESSION_FACTOR}, max_steps=${MAX_STEPS}, max_tokens=${MAX_TOKENS}, token_stats=${RUN_TOKEN_STATS}"
     log "Concurrency: pipeline_workers=${NUM_WORKERS}, tool_workers=${TOOL_SERVER_WORKERS_PER_TOOL}, tool_max_requests=${TOOL_SERVER_MAX_CONCURRENT_REQUESTS}, tool_thread_pool=${TOOL_SERVER_THREAD_POOL_SIZE}, browser_max_actors=${TEXT_BROWSER_MAX_ACTIVE_ACTORS}, browser_idle_pool=${TEXT_BROWSER_IDLE_POOL_SIZE}, browser_actor_cpus=${TEXT_BROWSER_ACTOR_CPUS}"
+    log "Recovery: benchmark_max_retries=${BENCHMARK_MAX_RETRIES}, retry_delay=${BENCHMARK_RETRY_DELAY_SEC}s, resume=${RESUME}, ray_tmpdir=${RAY_TMPDIR}"
     log "Timeouts: env_rpc=${TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC}s, browser_action=${TEXT_BROWSER_ACTION_TIMEOUT_SEC}s, tool_request=${TOOL_SERVER_REQUEST_TIMEOUT}s; prompt_tokenizer=${MINI_WEB_ARENA_PROMPT_MODEL}, local_only=${MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY}"
 
     if [[ "${START_VLLM}" == "1" ]]; then
+        stop_existing_vllm
         start_vllm
     else
         log "Skipping vLLM startup; waiting for existing service."

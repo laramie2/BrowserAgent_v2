@@ -18,7 +18,9 @@
       "--tool-max-requests", "128",
       "--browser-max-actors", "128",
       "--browser-ray-cpus", "128"
-    ]
+    ],
+    "benchmark_max_retries": 5,
+    "benchmark_retry_delay": 5
   },
   "jobs": [
     {
