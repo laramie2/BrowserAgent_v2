@@ -6,6 +6,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -26,9 +27,18 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         return
 
 
+class BadGatewayHandler(HealthHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        payload = b"upstream unavailable"
+        self.send_response(502)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
 @contextmanager
-def health_server():
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler)
+def health_server(handler=HealthHandler):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -43,6 +53,17 @@ def reserve_port() -> int:
     with socket.socket() as handle:
         handle.bind(("127.0.0.1", 0))
         return handle.getsockname()[1]
+
+
+def wait_for_port(port: int, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise TimeoutError(f"port {port} did not open")
 
 
 def write_fake_runtime(path: Path) -> None:
@@ -172,6 +193,125 @@ class EvalRunnerRetryTest(unittest.TestCase):
             )
             count = int(counter.read_text(encoding="utf-8").strip())
             return result, count
+
+    def test_unhealthy_unknown_tool_port_is_detected_without_killing_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, health_server(BadGatewayHandler) as port:
+            temp = Path(directory)
+            tokenizer = temp / "tokenizer"
+            tokenizer.mkdir()
+            (tokenizer / "tokenizer.json").write_text("{}", encoding="utf-8")
+            prompt = temp / "prompt.txt"
+            data = temp / "nq.parquet"
+            prompt.write_text("prompt", encoding="utf-8")
+            data.write_bytes(b"data")
+            env = {
+                **os.environ,
+                "MINI_WEB_ARENA_PROMPT_MODEL": str(tokenizer),
+                "RUN_ID": f"occupied_tool_port_test_{os.getpid()}",
+            }
+            result = subprocess.run(
+                [
+                    str(ROOT / "run_eval_all.sh"),
+                    "--benchmarks", "nq",
+                    "--skip-vllm",
+                    "--vllm-health-url", f"http://127.0.0.1:{port}/v1/models",
+                    "--tool-server-port", str(port),
+                    "--pipeline-python", "/bin/true",
+                    "--prompt-path", str(prompt),
+                    "--nq-data-path", str(data),
+                    "--output-dir", str(temp / "results"),
+                    "--no-token-stats",
+                    "--no-use-vlm",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn(
+                f"Port {port} is occupied, but no matching tool-server process",
+                result.stdout,
+            )
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                pass
+
+    def test_matching_stale_tool_server_is_replaced_before_evaluation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, health_server() as vllm_port:
+            temp = Path(directory)
+            fake_runtime = temp / "fake-runtime"
+            write_fake_runtime(fake_runtime)
+            tokenizer = temp / "tokenizer"
+            tokenizer.mkdir()
+            (tokenizer / "tokenizer.json").write_text("{}", encoding="utf-8")
+            prompt = temp / "prompt.txt"
+            data = temp / "nq.parquet"
+            prompt.write_text("prompt", encoding="utf-8")
+            data.write_bytes(b"data")
+            tool_pids = temp / "tool-pids"
+            counter = temp / "counter"
+            counter.write_text("1", encoding="utf-8")
+            tool_port = reserve_port()
+            env = {
+                **os.environ,
+                "FAKE_TOOL_PIDS": str(tool_pids),
+                "FAKE_VLLM_PIDS": str(temp / "unused-vllm-pids"),
+                "FAKE_COUNTER": str(counter),
+                "MINI_WEB_ARENA_PROMPT_MODEL": str(tokenizer),
+                "RUN_ID": f"replace_stale_tool_test_{os.getpid()}",
+            }
+            stale = subprocess.Popen(
+                [
+                    str(fake_runtime),
+                    "-m", "verl_tool.servers.serve",
+                    "--port", str(tool_port),
+                ],
+                env=env,
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                wait_for_port(tool_port)
+                result = subprocess.run(
+                    [
+                        str(ROOT / "run_eval_all.sh"),
+                        "--benchmarks", "nq",
+                        "--skip-vllm",
+                        "--vllm-health-url", f"http://127.0.0.1:{vllm_port}/v1/models",
+                        "--tool-server-port", str(tool_port),
+                        "--tool-server-python", str(fake_runtime),
+                        "--pipeline-python", str(fake_runtime),
+                        "--prompt-path", str(prompt),
+                        "--nq-data-path", str(data),
+                        "--output-dir", str(temp / "results"),
+                        "--benchmark-max-retries", "0",
+                        "--no-token-stats",
+                        "--no-use-vlm",
+                    ],
+                    cwd=ROOT,
+                    env=env,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=30,
+                    check=False,
+                )
+            finally:
+                if stale.poll() is None:
+                    stale.terminate()
+                stale.wait(timeout=5)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            tool_pid_values = tool_pids.read_text().splitlines()
+            self.assertEqual(len(tool_pid_values), 2, result.stdout)
+            self.assertEqual(int(tool_pid_values[0]), stale.pid)
+            self.assertNotEqual(tool_pid_values[0], tool_pid_values[1])
+            self.assertIn("Stopping existing tool-server", result.stdout)
+            for pid in tool_pid_values:
+                self.assertFalse(Path(f"/proc/{pid}").exists(), f"leaked pid {pid}")
 
     def test_dry_run_does_not_treat_existing_health_endpoint_as_stale_vllm(self) -> None:
         with health_server() as port:

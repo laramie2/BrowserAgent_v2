@@ -138,6 +138,8 @@ Set `benchmark_max_retries` to `0` to disable automatic retries. `--no-resume` a
 
 The runner uses a short, run-specific Ray directory under `/tmp` by default to stay below the Unix socket path limit. `RAY_TMPDIR_OVERRIDE` remains available when a machine needs a specific short location. Queue-defined environment variables may reference one another, so `model_path: "${MODEL_ROOT}/model"` works when `MODEL_ROOT` is declared in `defaults.env`.
 
+Before loading a model, the runner checks the vLLM and tool-server TCP ports rather than relying only on a successful health response. A stale matching vLLM/tool-server process is stopped before startup, including a tool router that owns the port but returns HTTP 502. An unknown process is never killed automatically; the run fails with an `ss` inspection command. Use `--skip-vllm` or `--skip-tool-server` only to reuse an intentionally managed service, and use `--no-kill-existing-vllm` or `--no-kill-existing-tool-server` to disable replacement explicitly.
+
 Queue state is written atomically to:
 
 ```text

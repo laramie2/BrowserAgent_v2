@@ -41,6 +41,7 @@ START_VLLM="${START_VLLM:-1}"
 
 TOOL_SERVER_PYTHON="${TOOL_SERVER_PYTHON:-python}"
 TOOL_SERVER_PORT="${TOOL_SERVER_PORT:-5000}"
+KILL_EXISTING_TOOL_SERVER="${KILL_EXISTING_TOOL_SERVER:-1}"
 TOOL_SERVER_READY_TIMEOUT="${TOOL_SERVER_READY_TIMEOUT:-300}"
 TOOL_SERVER_HEALTH_URL="${TOOL_SERVER_HEALTH_URL:-http://127.0.0.1:${TOOL_SERVER_PORT}/health}"
 TOOL_SERVER_WORKERS_PER_TOOL="${TOOL_SERVER_WORKERS_PER_TOOL:-128}"
@@ -192,6 +193,7 @@ Tool-server options:
       --browser-idle-pool N       Warm idle browser actors. Default: 16.
       --browser-ray-cpus N        Ray CPU budget for text browser actors.
       --skip-tool-server          Use an already running tool-server.
+      --no-kill-existing-tool-server
       --tool-ready-timeout SEC
       --tool-server-python PATH
 
@@ -562,6 +564,11 @@ parse_args() {
                 ;;
             --skip-tool-server)
                 START_TOOL_SERVER=0
+                KILL_EXISTING_TOOL_SERVER=0
+                shift
+                ;;
+            --no-kill-existing-tool-server)
+                KILL_EXISTING_TOOL_SERVER=0
                 shift
                 ;;
             --tool-server-port)
@@ -693,6 +700,11 @@ http_ok() {
     curl -fsS --max-time 5 "${url}" >/dev/null 2>&1
 }
 
+tcp_port_open() {
+    local port="$1"
+    (exec 9<>"/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1
+}
+
 wait_for_http() {
     local name="$1"
     local url="$2"
@@ -770,30 +782,60 @@ stop_process_group() {
 
 stop_existing_vllm() {
     [[ "${DRY_RUN}" != "1" ]] || return 0
-    http_ok "${VLLM_HEALTH_URL}" || return 0
+    tcp_port_open "${VLLM_PORT}" || return 0
     if [[ "${KILL_EXISTING_VLLM}" != "1" ]]; then
-        die "A vLLM service is already responding on port ${VLLM_PORT}. Use --skip-vllm to reuse it or allow the runner to replace it."
+        die "Port ${VLLM_PORT} is already in use. Use --skip-vllm to reuse its service or allow the runner to replace it."
     fi
 
     local pattern="vllm\.entrypoints\.openai\.api_server.*--port([=[:space:]])${VLLM_PORT}([[:space:]]|$)"
     if ! pgrep -f "${pattern}" >/dev/null 2>&1; then
-        die "Port ${VLLM_PORT} already serves vLLM, but its process could not be identified safely. Stop it explicitly or use --skip-vllm."
+        die "Port ${VLLM_PORT} is occupied, but no matching vLLM API process was identified safely. Inspect it with: ss -ltnp '( sport = :${VLLM_PORT} )'"
     fi
 
     log "Stopping existing vLLM service on port ${VLLM_PORT} before model startup"
     pkill -TERM -f "${pattern}" 2>/dev/null || true
     local i
     for i in {1..30}; do
-        http_ok "${VLLM_HEALTH_URL}" || return 0
+        tcp_port_open "${VLLM_PORT}" || return 0
         sleep 1
     done
-    log "Existing vLLM did not stop after SIGTERM; sending SIGKILL"
+    log "Existing vLLM did not release port ${VLLM_PORT} after SIGTERM; sending SIGKILL"
     pkill -KILL -f "${pattern}" 2>/dev/null || true
     for i in {1..10}; do
-        http_ok "${VLLM_HEALTH_URL}" || return 0
+        tcp_port_open "${VLLM_PORT}" || return 0
         sleep 1
     done
-    die "Existing vLLM is still responding on port ${VLLM_PORT}."
+    die "Existing vLLM is still holding port ${VLLM_PORT}."
+}
+
+stop_existing_tool_server() {
+    [[ "${DRY_RUN}" != "1" ]] || return 0
+    tcp_port_open "${TOOL_SERVER_PORT}" || return 0
+    if [[ "${KILL_EXISTING_TOOL_SERVER}" != "1" ]]; then
+        die "Port ${TOOL_SERVER_PORT} is already in use. Use --skip-tool-server to reuse its service or allow the runner to replace it."
+    fi
+
+    local pattern="verl_tool\.servers\.serve.*--port([=[:space:]])${TOOL_SERVER_PORT}([[:space:]]|$)"
+    local pids=()
+    mapfile -t pids < <(pgrep -f "${pattern}" || true)
+    if (( ${#pids[@]} == 0 )); then
+        die "Port ${TOOL_SERVER_PORT} is occupied, but no matching tool-server process was identified safely. Inspect it with: ss -ltnp '( sport = :${TOOL_SERVER_PORT} )'"
+    fi
+
+    log "Stopping existing tool-server on port ${TOOL_SERVER_PORT}; pids=${pids[*]}"
+    kill -TERM "${pids[@]}" 2>/dev/null || true
+    local i
+    for i in {1..30}; do
+        tcp_port_open "${TOOL_SERVER_PORT}" || return 0
+        sleep 1
+    done
+    log "Existing tool-server did not release port ${TOOL_SERVER_PORT} after SIGTERM; sending SIGKILL"
+    kill -KILL "${pids[@]}" 2>/dev/null || true
+    for i in {1..10}; do
+        tcp_port_open "${TOOL_SERVER_PORT}" || return 0
+        sleep 1
+    done
+    die "Existing tool-server is still holding port ${TOOL_SERVER_PORT}."
 }
 
 cleanup() {
@@ -821,7 +863,8 @@ export_runtime_config() {
     export VLLM_MODEL_PATH VLLM_PYTHON VLLM_CUDA_DEVICES VLLM_HOST VLLM_PORT
     export VLLM_SERVED_MODEL_NAME VLLM_MAX_MODEL_LEN VLLM_TENSOR_PARALLEL_SIZE
     export VLLM_GPU_MEMORY_UTILIZATION KILL_EXISTING_VLLM CLEAN_TRITON_CACHE
-    export TOOL_SERVER_PYTHON TOOL_SERVER_PORT TOOL_SERVER_WORKERS_PER_TOOL
+    export TOOL_SERVER_PYTHON TOOL_SERVER_PORT KILL_EXISTING_TOOL_SERVER
+    export TOOL_SERVER_WORKERS_PER_TOOL
     export TOOL_SERVER_MAX_CONCURRENT_REQUESTS TOOL_SERVER_THREAD_POOL_SIZE
     export TOOL_SERVER_REQUEST_TIMEOUT TOOL_SERVER_UVI_WORKERS TOOL_SERVER_ROUTER_WORKERS
     export TEXT_BROWSER_RAY_NUM_CPUS TEXT_BROWSER_MAX_ACTIVE_ACTORS
@@ -858,8 +901,8 @@ start_tool_server() {
         log "DRY-RUN tool-server: ${SCRIPT_PATH} __run_tool_server"
         return 0
     fi
-    if http_ok "${TOOL_SERVER_HEALTH_URL}"; then
-        die "A tool-server is already responding on port ${TOOL_SERVER_PORT}. Use --skip-tool-server to reuse it or stop it before this run."
+    if tcp_port_open "${TOOL_SERVER_PORT}"; then
+        die "Tool-server port ${TOOL_SERVER_PORT} became occupied before startup; refusing to launch a duplicate."
     fi
 
     export_runtime_config
@@ -877,8 +920,8 @@ restart_tool_server_for_retry() {
 
     stop_process_group "tool-server" "${TOOL_SERVER_PID}"
     TOOL_SERVER_PID=""
-    if http_ok "${TOOL_SERVER_HEALTH_URL}"; then
-        die "Owned tool-server still responds after shutdown; refusing to start a duplicate on port ${TOOL_SERVER_PORT}."
+    if tcp_port_open "${TOOL_SERVER_PORT}"; then
+        die "Owned tool-server still holds port ${TOOL_SERVER_PORT} after shutdown; refusing to launch a duplicate."
     fi
     start_tool_server
     wait_for_http "tool-server" "${TOOL_SERVER_HEALTH_URL}" "${TOOL_SERVER_READY_TIMEOUT}" "${TOOL_SERVER_PID}"
@@ -1183,8 +1226,16 @@ main() {
     log "Recovery: benchmark_max_retries=${BENCHMARK_MAX_RETRIES}, retry_delay=${BENCHMARK_RETRY_DELAY_SEC}s, resume=${RESUME}, ray_tmpdir=${RAY_TMPDIR}"
     log "Timeouts: env_rpc=${TEXT_BROWSER_ENV_RPC_TIMEOUT_SEC}s, browser_action=${TEXT_BROWSER_ACTION_TIMEOUT_SEC}s, tool_request=${TOOL_SERVER_REQUEST_TIMEOUT}s; prompt_tokenizer=${MINI_WEB_ARENA_PROMPT_MODEL}, local_only=${MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY}"
 
+    # Resolve both local port conflicts before loading a model. This avoids
+    # spending GPU startup time only to fail later when the tool port is stale.
     if [[ "${START_VLLM}" == "1" ]]; then
         stop_existing_vllm
+    fi
+    if [[ "${START_TOOL_SERVER}" == "1" ]]; then
+        stop_existing_tool_server
+    fi
+
+    if [[ "${START_VLLM}" == "1" ]]; then
         start_vllm
     else
         log "Skipping vLLM startup; waiting for existing service."
