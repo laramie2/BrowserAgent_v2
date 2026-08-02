@@ -1,0 +1,35 @@
+# Training stack validated by this repository's 2026-07-21 SFT/merge logs.
+# PyTorch/torchvision/torchaudio are installed separately from the cu126 index.
+ms-swift==3.12.6
+deepspeed==0.19.2
+transformers==4.54.1
+accelerate==1.9.0
+datasets==3.2.0
+peft==0.17.1
+trl==0.19.1
+
+# Qwen-VL image/video data and model loading.
+qwen-vl-utils==0.0.8
+av==17.1.0
+modelscope==1.38.1
+
+# Dependencies pulled by the resolved MS-Swift UI/embedding stack. Keep them
+# explicit so pip repairs incomplete pre-existing distributions instead of
+# treating ipywidgets/sentence-transformers as already satisfied.
+ipywidgets==8.1.8
+comm==0.2.3
+ipython==8.37.0
+traitlets==5.14.3
+widgetsnbextension==4.0.15
+jupyterlab-widgets==3.0.16
+sentence-transformers==5.6.0
+scikit-learn==1.7.2
+
+# Numeric, tokenizer, checkpoint, and training utilities.
+numpy==1.26.4
+tokenizers==0.21.4
+safetensors==0.8.0
+sentencepiece==0.2.2
+einops==0.8.2
+tensorboard==2.21.0
+ninja==1.13.0

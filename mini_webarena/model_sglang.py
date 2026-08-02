@@ -9,7 +9,13 @@ class Tokenizer(object):
         # elif provider == "huggingface":
         if provider == "huggingface":
             # print(model_name)
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            local_only = os.path.isdir(model_name) or os.getenv(
+                "MINI_WEB_ARENA_TOKENIZER_LOCAL_ONLY", ""
+            ).strip().lower() in {"1", "true", "yes", "on"}
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                local_files_only=local_only,
+            )
             # turn off adding special tokens automatically
             self.tokenizer.add_special_tokens = False  # type: ignore[attr-defined]
             self.tokenizer.add_bos_token = False  # type: ignore[attr-defined]

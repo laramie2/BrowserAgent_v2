@@ -23,6 +23,19 @@ else
 fi
 
 echo
+echo "===== watchdog ====="
+if [[ -f "$STATE_DIR/wiki-watchdog.pid" ]]; then
+    watchdog_pid="$(cat "$STATE_DIR/wiki-watchdog.pid" 2>/dev/null || true)"
+    if [[ -n "$watchdog_pid" ]] && kill -0 "$watchdog_pid" >/dev/null 2>&1; then
+        echo "wiki-watchdog pid=$watchdog_pid status=running"
+    else
+        echo "wiki-watchdog pid=${watchdog_pid:-unknown} status=stopped"
+    fi
+else
+    echo "No watchdog pid file found."
+fi
+
+echo
 echo "===== backend health ====="
 if [[ -f "$STATE_DIR/backends.txt" ]]; then
     IFS=, read -r -a backend_ports <"$STATE_DIR/backends.txt"
@@ -44,6 +57,12 @@ echo "===== recent logs ====="
 if [[ -f "$LOG_DIR/wiki-lb.log" ]]; then
     echo "--- wiki-lb ---"
     tail -n 20 "$LOG_DIR/wiki-lb.log"
+fi
+
+if [[ -f "$LOG_DIR/wiki-watchdog.log" ]]; then
+    echo
+    echo "--- wiki-watchdog ---"
+    tail -n 20 "$LOG_DIR/wiki-watchdog.log"
 fi
 
 for log_file in "$LOG_DIR"/wikipedia-*.log; do
