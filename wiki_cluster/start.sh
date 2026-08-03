@@ -91,7 +91,7 @@ backends="$(IFS=,; echo "${backend_ports[*]}")"
 echo "$backends" >"$STATE_DIR/backends.txt"
 
 echo "[3/4] Start Python load balancer on ${LB_HOST}:${LB_PORT}..."
-setsid python3 "$SCRIPT_DIR/wiki_lb.py" \
+setsid python3 "$SCRIPT_DIR/load_balancer.py" \
     --listen-host "$LB_HOST" \
     --listen-port "$LB_PORT" \
     --backends "$backends" \

@@ -7,7 +7,7 @@ from .browser_env import Trajectory
 from .browser_actions import Action, ActionParsingError
 from .browser_login import URL_MAPPINGS
 from .utils import StateInfo, LMConfig
-from .model import Tokenizer
+from .model_client import Tokenizer
 # from llms.utils import APIInput
 
 

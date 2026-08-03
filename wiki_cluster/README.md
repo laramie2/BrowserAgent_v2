@@ -12,7 +12,7 @@ bundled Kiwix 3.3.0 archive, downloads the Wiki ZIM parts, and assembles the ZIM
 locally:
 
 ```bash
-python3 scripts/prepare_training.py prepare
+python3 env/prepare_resources.py prepare
 ```
 
 The default layout stores one physical ZIM and `./wiki_cluster/start.sh` uses
@@ -20,7 +20,7 @@ one ZIM path. To expose four compatible paths without duplicating the ZIM
 bytes:
 
 ```bash
-python3 scripts/prepare_training.py prepare --wiki-copies 4
+python3 env/prepare_resources.py prepare --wiki-copies 4
 ZIM_COPIES=4 ./wiki_cluster/start.sh
 ```
 
@@ -74,6 +74,3 @@ Logs and pid files are written under `wiki_cluster/run/`.
 
 `start.sh` also launches `wiki_watchdog.sh`, which restarts an individual
 `kiwix-serve` backend when its pid exits or its health check fails repeatedly.
-
-`docker-compose.yml` is kept as the old Docker-based launcher for machines that
-can run Docker directly.

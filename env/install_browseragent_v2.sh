@@ -216,7 +216,7 @@ else
   python -m playwright install chromium
 fi
 
-python "$SCRIPT_DIR/verify_env.py" browseragent-v2
+python "$SCRIPT_DIR/verify_environment.py" browseragent-v2
 conda list --explicit > "$CONDA_PREFIX/conda-explicit.txt"
 python -m pip freeze --all | LC_ALL=C sort > "$CONDA_PREFIX/pip-freeze.txt"
 echo "$ENV_NAME is ready. Activate it with: conda activate $ENV_NAME"

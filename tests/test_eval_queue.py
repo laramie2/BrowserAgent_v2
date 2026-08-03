@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.run_eval_queue import command_for, load_jobs
+from evaluate.run_queue import command_for, load_jobs
 
 
 class EvalQueueConfigTest(unittest.TestCase):

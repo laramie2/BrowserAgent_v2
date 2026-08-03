@@ -8,7 +8,7 @@ RECREATE="${RECREATE:-0}"
 VERIFIER_REVISION="2026-07-22-swift-sft-v2"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REQUIREMENTS_FILE="$SCRIPT_DIR/requirements_swift_sft.txt"
-VERIFIER_FILE="$SCRIPT_DIR/verify_env.py"
+VERIFIER_FILE="$SCRIPT_DIR/verify_environment.py"
 
 die() {
   echo "ERROR: $*" >&2
@@ -29,7 +29,7 @@ nvidia-smi >/dev/null || die "The NVIDIA driver is not working."
 [[ -f "$REQUIREMENTS_FILE" ]] || die "Missing $REQUIREMENTS_FILE."
 [[ -f "$VERIFIER_FILE" ]] || die "Missing $VERIFIER_FILE."
 grep -Fqx "CONFIG_REVISION = \"$VERIFIER_REVISION\"" "$VERIFIER_FILE" || \
-  die "install_swift_sft.sh and verify_env.py are from different config revisions; sync the complete env/ directory."
+  die "install_swift_sft.sh and verify_environment.py are from different config revisions; sync the complete env/ directory."
 
 eval "$(conda shell.bash hook)"
 

@@ -40,7 +40,7 @@ for pid_file in "${pid_files[@]}"; do
 
     if kill -0 "$pid" >/dev/null 2>&1; then
         cmdline="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-        if [[ "$cmdline" == *"kiwix-serve"* || "$cmdline" == *"wiki_lb.py"* || "$cmdline" == *"wiki_watchdog.sh"* ]]; then
+        if [[ "$cmdline" == *"kiwix-serve"* || "$cmdline" == *"load_balancer.py"* || "$cmdline" == *"wiki_watchdog.sh"* ]]; then
             echo "Stopping $name pid=$pid"
             kill "$pid" >/dev/null 2>&1 || true
         else
@@ -57,7 +57,7 @@ for pid_file in "${pid_files[@]}"; do
     pid="$(cat "$pid_file" 2>/dev/null || true)"
     if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
         cmdline="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-        if [[ "$cmdline" == *"kiwix-serve"* || "$cmdline" == *"wiki_lb.py"* || "$cmdline" == *"wiki_watchdog.sh"* ]]; then
+        if [[ "$cmdline" == *"kiwix-serve"* || "$cmdline" == *"load_balancer.py"* || "$cmdline" == *"wiki_watchdog.sh"* ]]; then
             echo "Force stopping pid=$pid"
             kill -9 "$pid" >/dev/null 2>&1 || true
         fi

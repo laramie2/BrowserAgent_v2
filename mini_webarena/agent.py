@@ -17,7 +17,7 @@ from .browser_actions import (
 from .utils import Observation, StateInfo, LMConfig, construct_llm_config
 
 # Refactored Implementation
-from .model_sglang import Tokenizer, call_llm
+from .model_client import Tokenizer, call_llm
 
 class Agent:
     """Base class for the agent"""
@@ -163,20 +163,6 @@ def parse_action(response, prompt_constructor):
         action["raw_prediction"] = response
     # print(action)
     return action
-
-# def construct_agent(model_name, inference_endpoint) -> Agent:
-#     llm_config = construct_llm_config(model_name, inference_endpoint)
-#     tokenizer = Tokenizer("huggingface", model_name)
-#     from prompt import CoTPromptConstructor
-#     prompt_constructor = CoTPromptConstructor(
-#             "/home/zhiheng/AgentRAG/agent/jsons/p_cot_id_actree_2s.json", lm_config=llm_config, tokenizer=tokenizer
-#         )
-#     agent = PromptAgent(
-#             action_set_tag="id_accessibility_tree",
-#             lm_config=llm_config,
-#             prompt_constructor=prompt_constructor,
-#         )
-#     return agent
 
 # Once we have this we can decompose the agent into smaller components
 def construct_promptConstructor(model_name, inference_endpoint) -> PromptConstructor:

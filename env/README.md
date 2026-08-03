@@ -111,7 +111,7 @@ conda env config vars set -n browseragent-v2 \
 conda deactivate
 conda activate browseragent-v2
 python -m playwright install chromium
-python env/verify_env.py browseragent-v2
+python env/verify_environment.py browseragent-v2
 ```
 
 ## 验证
@@ -124,7 +124,7 @@ export CUDA_HOME="$CONDA_PREFIX"
 export PATH="$CUDA_HOME/bin:$PATH"
 export CUDNN_HOME="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib") + "/nvidia/cudnn")')"
 export LD_LIBRARY_PATH="$CUDNN_HOME/lib:$CUDA_HOME/lib:$CUDA_HOME/lib64:$CUDA_HOME/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}"
-python env/verify_env.py browseragent-v2
+python env/verify_environment.py browseragent-v2
 ```
 
 ```bash
@@ -132,7 +132,7 @@ conda activate swift-sft
 export CUDA_HOME="$CONDA_PREFIX"
 export PATH="$CUDA_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$CUDA_HOME/lib:$CUDA_HOME/lib64:$CUDA_HOME/targets/x86_64-linux/lib:${LD_LIBRARY_PATH:-}"
-python env/verify_env.py swift-sft
+python env/verify_environment.py swift-sft
 ```
 
 验证内容包括 Python 与关键包版本、`mini_webarena`/reward manager 等核心模块导入、Torch 编译使用的 CUDA、GPU 可见性、Conda Toolkit 精确版本、`nvcc` 是否来自当前环境、实际启动无头 Chromium，以及 `pip check`。
@@ -156,25 +156,20 @@ python env/verify_env.py swift-sft
 - `tensorboard`：训练日志。
 - `ninja` 与环境内 CUDA/GCC 工具链：按需 JIT 编译 DeepSpeed 扩展。
 
-A100 训练使用 `bfloat16`。仓库训练脚本已经设置 `CUDA_HOME=$CONDA_PREFIX` 和 `--torch_dtype bfloat16`，但 `sft/01_run_sft_1.sh` 仍包含当前机器专用配置。迁移到新机器后，运行前必须检查并修改脚本顶部的：
+A100 training uses `bfloat16`. The SFT scripts use project-relative defaults and accept `SFT_DATASET_NAME`, `SFT_DATASET_DIR`, `BASE_MODEL_PATH`, `CUDA_VISIBLE_DEVICES`, and `NPROC_PER_NODE` overrides; no source edit is required.
 
-- `SFT_ROOT`：新机器上的仓库 `sft/` 绝对路径。
-- `MODEL_PATH` 和数据集目录：确认模型及数据实际存在。
-- `CUDA_VISIBLE_DEVICES`：改成新机器计划使用的 GPU 编号。
-- `NPROC_PER_NODE`：与可见 GPU 数量一致。
-
-确认这些配置后再启动：
+Start training:
 
 ```bash
 conda activate swift-sft
-bash sft/01_run_sft_1.sh
+bash sft/train.sh
 ```
 
 LoRA 合并示例：
 
 ```bash
 conda activate swift-sft
-bash sft/02_merge_lora.sh
+bash sft/merge_lora.sh
 ```
 
 ## BrowserAgent/verl-tool 使用
@@ -197,17 +192,6 @@ cd verl-tool
 
 因此当前 `pip freeze` 只能作为找回人工补装依赖的审计材料，不能原样作为新机器安装锁。本方案固定已实际运行的核心版本，同时修正上述冲突和 CUDA 对齐问题。
 
-## 历史 cu124 方案和独立 vLLM 环境
-
-以下文件保留为历史备选，没有被修改，也不由 `install_all.sh` 调用：
-
-- `install_swift_sft_cu124_pinned.sh`
-- `requirements_swift_sft_cu124.txt`
-- `swift-sft-cu124-py310.lock.txt`
-
-它们对应 Torch 2.6/cu124、MS-Swift 3.5.0，不是当前推荐训练环境。
-
-`install_vllm_server.sh` 也继续保留，但独立 vLLM 服务环境不属于本次两个环境的默认安装范围。
 
 ## 常见问题
 
@@ -246,7 +230,7 @@ Transformer Engine 2.6.0.post1 在 Linux 上从源码构建，如果编译器没
 更新 `env/` 目录后重建：
 
 ```bash
-cd /data1/yutao/BrowserAgent_v2
+cd /path/to/BrowserAgent_v2
 conda deactivate
 RECREATE=1 bash env/install_browseragent_v2.sh
 ```
@@ -265,12 +249,12 @@ RECREATE=1 bash env/install_browseragent_v2.sh
 已完成其他安装步骤的环境可以原地重新安装这两个包：
 
 ```bash
-cd /data1/yutao/BrowserAgent_v2
+cd /path/to/BrowserAgent_v2
 conda activate browseragent-v2
 python -m pip install --no-cache-dir --force-reinstall --no-deps \
   transformers==4.57.6 tokenizers==0.22.2
 python -c 'from tokenizers import Encoding; from transformers import AutoTokenizer; print("tokenizer stack: ok")'
-python env/verify_env.py browseragent-v2
+python env/verify_environment.py browseragent-v2
 ```
 
 若环境此前经历过多次失败安装，推荐同步完整 `env/` 目录后干净重建：
@@ -295,7 +279,7 @@ PyTorch 2.8/cu128 wheel 自带 cuDNN 9.10。如果环境同时安装 Conda cuDNN
 现有环境可以原地修复：
 
 ```bash
-cd /data1/yutao/BrowserAgent_v2
+cd /path/to/BrowserAgent_v2
 conda activate browseragent-v2
 python -m pip install --no-cache-dir \
   tensorboard==2.20.0 protobuf==5.29.6 comm==0.2.3
@@ -309,7 +293,7 @@ conda deactivate
 conda activate browseragent-v2
 
 python -c 'import transformer_engine; import megatron.core; print("TE/Megatron: ok")'
-python env/verify_env.py browseragent-v2
+python env/verify_environment.py browseragent-v2
 ```
 
 修复后必须重新启动训练任务和 Ray worker，让新进程继承更新后的动态库路径。
@@ -325,7 +309,7 @@ Conda 会以 `ChecksumMismatchError` 终止。
 扩展编译，但依赖图中不再包含 `nsight-compute`。同步新版 `env/` 后重建失败留下的环境：
 
 ```bash
-cd /data1/yutao/BrowserAgent_v2
+cd /path/to/BrowserAgent_v2
 conda deactivate
 RECREATE=1 bash env/install_swift_sft.sh
 ```
@@ -335,7 +319,7 @@ RECREATE=1 bash env/install_swift_sft.sh
 ### Swift 安装末尾仍查询 `cuda-toolkit` 或 `pip check` 报 Decord
 
 如果输出中仍有 `cannot query Conda package cuda-toolkit`，说明只更新了
-`install_swift_sft.sh`，但实际运行的 `verify_env.py` 仍是旧版本。当前两个文件共享配置版本
+`install_swift_sft.sh`，但实际运行的 `verify_environment.py` 仍是旧版本。当前两个文件共享配置版本
 `2026-07-22-swift-sft-v2`；新版安装器会在创建环境前检查版本，不匹配就直接退出。
 迁移时必须同步完整的 `env/` 目录。
 
@@ -347,12 +331,12 @@ PyPI 的 `decord==0.6.0` 文件名看似支持 Python 3，但 wheel 内部实际
 对于已经完成主要安装、只在最终验证失败的环境，可以原地修复：
 
 ```bash
-cd /data1/yutao/BrowserAgent_v2
+cd /path/to/BrowserAgent_v2
 conda activate swift-sft
 python -m pip uninstall -y decord
 conda install -y -c conda-forge --strict-channel-priority numpy=1.26.4 decord=0.6.0
 python -m pip install --no-cache-dir -r env/requirements_swift_sft.txt
-python env/verify_env.py swift-sft
+python env/verify_environment.py swift-sft
 ```
 
 ### `torch.cuda.is_available()` 为 false
@@ -389,10 +373,10 @@ python -m pip freeze --all
 
 ## 维护配置
 
-升级 CUDA、Torch、vLLM、MS-Swift 或 DeepSpeed 时，必须把对应安装脚本、requirements、`verify_env.py` 和本文版本矩阵一起修改。至少运行：
+升级 CUDA、Torch、vLLM、MS-Swift 或 DeepSpeed 时，必须把对应安装脚本、requirements、`verify_environment.py` 和本文版本矩阵一起修改。至少运行：
 
 ```bash
-python -m unittest discover -s env/tests -p 'test_*.py' -v
+python -m pytest -q tests/test_prepare_resources_cli.py tests/test_resource_setup.py
 bash -n env/install_*.sh
 ```
 

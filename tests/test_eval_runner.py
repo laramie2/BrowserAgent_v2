@@ -109,7 +109,7 @@ if module == "vllm.entrypoints.openai.api_server":
     serve("FAKE_VLLM_PIDS")
 if module == "verl_tool.servers.serve":
     serve("FAKE_TOOL_PIDS")
-if module == "gen_seq.pipeline":
+if module == "evaluate.pipeline":
     counter = Path(os.environ["FAKE_COUNTER"])
     count = int(counter.read_text() or "0") if counter.exists() else 0
     count += 1
@@ -163,7 +163,7 @@ class EvalRunnerRetryTest(unittest.TestCase):
             env.pop("RAY_TMPDIR", None)
             env.pop("RAY_TMPDIR_OVERRIDE", None)
             command = [
-                str(ROOT / "run_eval_all.sh"),
+                str(ROOT / "evaluate" / "run.sh"),
                 "--benchmarks", "nq",
                 "--skip-vllm",
                 "--skip-tool-server",
@@ -211,7 +211,7 @@ class EvalRunnerRetryTest(unittest.TestCase):
             }
             result = subprocess.run(
                 [
-                    str(ROOT / "run_eval_all.sh"),
+                    str(ROOT / "evaluate" / "run.sh"),
                     "--benchmarks", "nq",
                     "--skip-vllm",
                     "--vllm-health-url", f"http://127.0.0.1:{port}/v1/models",
@@ -278,7 +278,7 @@ class EvalRunnerRetryTest(unittest.TestCase):
                 wait_for_port(tool_port)
                 result = subprocess.run(
                     [
-                        str(ROOT / "run_eval_all.sh"),
+                        str(ROOT / "evaluate" / "run.sh"),
                         "--benchmarks", "nq",
                         "--skip-vllm",
                         "--vllm-health-url", f"http://127.0.0.1:{vllm_port}/v1/models",
@@ -317,7 +317,7 @@ class EvalRunnerRetryTest(unittest.TestCase):
         with health_server() as port:
             result = subprocess.run(
                 [
-                    str(ROOT / "run_eval_all.sh"),
+                    str(ROOT / "evaluate" / "run.sh"),
                     "--benchmarks", "nq",
                     "--dry-run",
                     "--pipeline-python", "/bin/true",
@@ -366,7 +366,7 @@ class EvalRunnerRetryTest(unittest.TestCase):
             env.pop("RAY_TMPDIR_OVERRIDE", None)
             result = subprocess.run(
                 [
-                    str(ROOT / "run_eval_all.sh"),
+                    str(ROOT / "evaluate" / "run.sh"),
                     "--benchmarks", "nq",
                     "--model-path", str(model),
                     "--vllm-python", str(fake_runtime),

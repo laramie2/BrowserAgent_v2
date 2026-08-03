@@ -2,7 +2,7 @@
 
 The evaluation stack is configured top-down:
 
-`experiments/eval_matrix.json` → `scripts/run_eval_experiments.py` → `run_eval_all.sh` → `gen_seq.pipeline`.
+`evaluate/configs/eval_matrix.json` → `evaluate/run_experiments.py` → `evaluate/run.sh` → `evaluate.pipeline`.
 
 The top-level runner owns ports, concurrency, timeouts, resume, VTC compression ratio, maximum browser steps, and generation length. The pipeline no longer hardcodes them.
 
@@ -11,7 +11,7 @@ The top-level runner owns ports, concurrency, timeouts, resume, VTC compression 
 Download the prompt tokenizer once before starting text-browser actors:
 
 ```bash
-python scripts/download_prompt_tokenizer.py
+python env/download_prompt_tokenizer.py
 ```
 
 The default local path is `models/Qwen2.5-14B-Instruct`. For another path:
@@ -26,9 +26,9 @@ This prevents every concurrent Ray actor from calling Hugging Face during initia
 ## Direct evaluation
 
 ```bash
-./run_eval_all.sh all \
+./evaluate/run.sh all \
   --model-path /models/my-checkpoint \
-  --output-dir gen_seq/results/my-checkpoint \
+  --output-dir evaluate/results/my-checkpoint \
   --num-workers 128 \
   --tool-workers 128 \
   --tool-max-requests 128 \
@@ -61,20 +61,20 @@ export COMPRESSION_MODEL_PATH=/models/sft-rl
 Inspect, dry-run, or execute:
 
 ```bash
-python scripts/run_eval_experiments.py --list
-python scripts/run_eval_experiments.py --group compression_ablation --dry-run
-python scripts/run_eval_experiments.py --group main
-python scripts/run_eval_experiments.py --group rl_ablation --experiment wo_dense_reward
+python evaluate/run_experiments.py --list
+python evaluate/run_experiments.py --group compression_ablation --dry-run
+python evaluate/run_experiments.py --group main
+python evaluate/run_experiments.py --group rl_ablation --experiment wo_dense_reward
 ```
 
 Arguments following `--` pass through to every total-eval invocation:
 
 ```bash
-python scripts/run_eval_experiments.py --group compression_ablation -- \
+python evaluate/run_experiments.py --group compression_ablation -- \
   --vllm-cuda-devices 0,1,2,3 --vllm-tensor-parallel-size 4
 ```
 
-Main experiments use all available rows. Both ablation groups use up to 1000 rows per benchmark with seed 42. These values live in `experiments/eval_matrix.json`.
+Main experiments use all available rows. Both ablation groups use up to 1000 rows per benchmark with seed 42. These values live in `evaluate/configs/eval_matrix.json`.
 
 ## Ordered evaluation queue
 
@@ -83,7 +83,7 @@ Use a queue when one machine should evaluate several already-merged models witho
 Start from the mixed example:
 
 ```bash
-cp experiments/eval_queue.example.json experiments/eval_queue.machine01.json
+cp evaluate/configs/eval_queue.example.json evaluate/configs/eval_queue.machine01.json
 ```
 
 Each job references a matrix experiment and overrides its local model path:
@@ -97,7 +97,7 @@ Each job references a matrix experiment and overrides its local model path:
 }
 ```
 
-The selected matrix entry supplies benchmark list, sample count, seed, and compression factor. Queue-level or job-level fields override those values. `env` supplies per-job environment variables and `extra_args` passes options to `run_eval_all.sh`.
+The selected matrix entry supplies benchmark list, sample count, seed, and compression factor. Queue-level or job-level fields override those values. `env` supplies per-job environment variables and `extra_args` passes options to `evaluate/run.sh`.
 
 Preflight the exact order and commands before occupying GPUs:
 
@@ -109,21 +109,21 @@ export VLLM_PYTHON=/path/to/vllm-env/bin/python
 export MINI_WEB_ARENA_PROMPT_MODEL=/models/Qwen2.5-14B-Instruct
 export TOKEN_STATS_MODEL_PATH=/models/Qwen2.5-VL-7B-Instruct
 
-python scripts/run_eval_queue.py \
-  --queue experiments/eval_queue.machine01.json --list
+python evaluate/run_queue.py \
+  --queue evaluate/configs/eval_queue.machine01.json --list
 
-python scripts/run_eval_queue.py \
-  --queue experiments/eval_queue.machine01.json --dry-run
+python evaluate/run_queue.py \
+  --queue evaluate/configs/eval_queue.machine01.json --dry-run
 ```
 
 Run the queue in tmux:
 
 ```bash
-python scripts/run_eval_queue.py \
-  --queue experiments/eval_queue.machine01.json
+python evaluate/run_queue.py \
+  --queue evaluate/configs/eval_queue.machine01.json
 ```
 
-For every job, `run_eval_all.sh` starts the selected model, evaluates it, computes token statistics, and stops its vLLM/tool-server process groups before the next job starts. Do not add `--skip-vllm` to a multi-model queue.
+For every job, `evaluate/run.sh` starts the selected model, evaluates it, computes token statistics, and stops its vLLM/tool-server process groups before the next job starts. Do not add `--skip-vllm` to a multi-model queue.
 
 A benchmark that exits with code `2` has unsaved environment/request failures. The runner now keeps the healthy vLLM process, restarts the tool server and its Ray runtime, and resumes the benchmark from its JSONL automatically. It retries five times by default. Code/configuration failures with other exit codes fail immediately instead of being hidden. Override the policy per queue or per job when needed:
 
@@ -143,14 +143,14 @@ Before loading a model, the runner checks the vLLM and tool-server TCP ports rat
 Queue state is written atomically to:
 
 ```text
-gen_seq/results/experiments/_queues/<queue-name>.json
+evaluate/results/experiments/_queues/<queue-name>.json
 ```
 
 Restarting the same command skips jobs recorded as completed with the same model/settings and resumes the interrupted job through its existing JSONL output. A changed model path or setting changes the job signature and causes that job to run again. Use `--rerun-completed` to intentionally rerun every completed item.
 
 By default the queue stops at the first failed experiment. After fixing the problem, rerun the same command. Use `--continue-on-error` only when later independent jobs should run despite a failure.
 
-The queue holds `gen_seq/results/experiments/_queues/evaluation.lock` for its full lifetime, preventing a second queue in the same repository from taking the same ports/GPUs. Use `--lock-file` only when intentionally running isolated queues on different GPU sets and ports.
+The queue holds `evaluate/results/experiments/_queues/evaluation.lock` for its full lifetime, preventing a second queue in the same repository from taking the same ports/GPUs. Use `--lock-file` only when intentionally running isolated queues on different GPU sets and ports.
 
 ## Existing BrowserAgent-v1 results
 
@@ -158,7 +158,7 @@ Count tokens without rerunning inference:
 
 ```bash
 export BROWSERAGENT_V1_RESULT_DIR=/path/to/browseragent-v1/results
-python -m gen_seq.token_stats \
+python -m evaluate.token_stats \
   --input "$BROWSERAGENT_V1_RESULT_DIR" \
   --model_path /local/path/to/base-vlm \
   --system_prompt prompt/system_prompt_with_history_info.txt \
@@ -170,17 +170,17 @@ python -m gen_seq.token_stats \
 
 ```bash
 export BROWSERAGENT_V1_RESULT_DIR=/path/to/browseragent-v1/results
-python scripts/summarize_eval_experiments.py
+python evaluate/summarize_experiments.py
 ```
 
-Outputs are `experiments/reports/evaluation_tables.md` and `.csv`. The Markdown contains all three requested tables and a raw-vs-compressed token detail table.
+Outputs are `evaluate/reports/evaluation_tables.md` and `.csv`. The Markdown contains all three requested tables and a raw-vs-compressed token detail table.
 
 ## Concurrency tuning
 
 Defaults match the RL setup at 128. On smaller hosts, lower pipeline, tool, actor, and Ray capacity together:
 
 ```bash
-./run_eval_all.sh nq --num-workers 64 --tool-workers 64 \
+./evaluate/run.sh nq --num-workers 64 --tool-workers 64 \
   --tool-max-requests 64 --browser-max-actors 64 --browser-ray-cpus 64
 ```
 

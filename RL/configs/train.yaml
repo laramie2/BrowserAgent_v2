@@ -1,9 +1,8 @@
 common:
   env:
-    SFT_MODEL_NAME_OVERRIDE: task-opsrc_12619-sft-5e-5lr-freeze_false-2epoch
-    # BENCHMARK_OVERRIDE: train_hotpot500_nq500
-    BENCHMARK_OVERRIDE: t0-e0.25-mh0.25-mm0.25-ml0.15-h0.10-2000
-    VAL_DATASET_NAME_OVERRIDE: test_100
+    SFT_MODEL_NAME_OVERRIDE: browseragent-sft
+    BENCHMARK_OVERRIDE: curriculum_medium_disjoint_n1000_seed42/stage_1_medium_warmup
+    VAL_DATASET_NAME_OVERRIDE: validation_100
     MASTER_PORT_OVERRIDE: 29501
     CUDA_VISIBLE_DEVICES: 0,1,2,3
     N_GPUS_PER_NODE_OVERRIDE: 4

@@ -686,12 +686,7 @@ class ScriptBrowserEnv(Env[dict[str, Observation], Action]):
             "startIndex": start_id
         })
 
-        # get ocr items
         ocr_items = []
-        # ocr_items = page.evaluate(canva_handler_script)
-        # svg_items, _ = page.evaluate(get_rect_script, {"selector": "svg", "startIndex": -1})
-        # ocr_items = ocr_items + svg_items
-        # ocr_items, start_id = get_canva_images(ocr_items, img_bytes, start_id)
 
         items = elem_items + ocr_items
 

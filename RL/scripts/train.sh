@@ -3,12 +3,11 @@ set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-PROJECT_DIR="$(cd "$RL_DIR/.." && pwd)"
 TRAIN_PRESET="${TRAIN_PRESET:-mt_grpo}"
 TRAIN_CONFIG="${TRAIN_CONFIG:-$RL_DIR/configs/train.yaml}"
 
 if [ -f "$TRAIN_CONFIG" ]; then
-    eval "$(python3 "$SCRIPT_DIR/yaml_env.py" train "$TRAIN_CONFIG" "$TRAIN_PRESET")"
+    eval "$(python3 "$SCRIPT_DIR/config_to_env.py" train "$TRAIN_CONFIG" "$TRAIN_PRESET")"
 fi
 
 cd "$RL_DIR"
@@ -36,26 +35,25 @@ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${NVIDIA_LD_LIBRARY_PATH:+:$NVIDIA_LD_L
 export LIBRARY_PATH="$CONDA_PREFIX/lib${NVIDIA_LD_LIBRARY_PATH:+:$NVIDIA_LD_LIBRARY_PATH}${LIBRARY_PATH:+:$LIBRARY_PATH}"
 
 export RUN_TAG="${RUN_TAG:-run1}"
-export RAY_TMPDIR="${RAY_TMPDIR_OVERRIDE:-/data/yutao/ray_tmp/${RUN_TAG}}"
+export RAY_TMPDIR="${RAY_TMPDIR_OVERRIDE:-/tmp/browseragent-ray/${RUN_TAG}}"
 mkdir -p "$RAY_TMPDIR"
 
 export RAY_PORT="${RAY_PORT_OVERRIDE:-6378}"
 
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3}
-export WANDB_API_KEY=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
 
 export MASTER_PORT="${MASTER_PORT_OVERRIDE:-29501}"
 # =====本机运行配置参数结束=====
 
 
-sft_model_name="${SFT_MODEL_NAME_OVERRIDE:-task-opsrc_12619-sft-5e-5lr-freeze_false-2epoch}"
-model_name=$(pwd)/models/Qwen2.5-VL-7B-Instruct-${sft_model_name}-merged
+sft_model_name="${SFT_MODEL_NAME_OVERRIDE:-browseragent-sft}"
+model_name="${SFT_MODEL_PATH_OVERRIDE:-${RL_DIR}/models/browseragent-sft}"
 export MINI_WEB_ARENA_PROMPT_MODEL="$model_name"
 export TRANSFORMERS_OFFLINE=1
 export HF_HUB_OFFLINE=1
 
-benchmark="${BENCHMARK_OVERRIDE:-train_hotpot500_nq500}"
-val_dataset_name="${VAL_DATASET_NAME_OVERRIDE:-test_20}"
+benchmark="${BENCHMARK_OVERRIDE:-curriculum_medium_disjoint_n1000_seed42/stage_1_medium_warmup}"
+val_dataset_name="${VAL_DATASET_NAME_OVERRIDE:-validation_100}"
 train_data=$(pwd)/dataset/${benchmark}/data.parquet
 val_data=$(pwd)/dataset/${val_dataset_name}/data.parquet
 
@@ -178,7 +176,7 @@ clip_ratio_c=${CLIP_RATIO_C_OVERRIDE:-10.0}
 loss_agg_mode=${LOSS_AGG_MODE_OVERRIDE:-token-mean}
 
 opd_enable=${OPD_ENABLE_OVERRIDE:-False}
-opd_teacher_model=${OPD_TEACHER_MODEL_OVERRIDE:-/data/yutao/lzt/BrowserAgent_v2/RL/models/Qwen2.5-VL-32B-Instruct}
+opd_teacher_model=${OPD_TEACHER_MODEL_OVERRIDE:-${RL_DIR}/models/Qwen2.5-VL-32B-Instruct}
 opd_teacher_cuda_visible_devices=${OPD_TEACHER_CUDA_VISIBLE_DEVICES:-}
 opd_teacher_tp_size=${OPD_TEACHER_TP_SIZE_OVERRIDE:-1}
 opd_teacher_dtype=${OPD_TEACHER_DTYPE_OVERRIDE:-bfloat16}

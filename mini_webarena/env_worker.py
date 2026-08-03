@@ -74,7 +74,7 @@ def _normalize_start_url(url: str | None) -> str:
 
 @lru_cache(maxsize=1)
 def _get_template_dict():
-    from .create_dataset import TEMPLATES
+    from .prompt_templates import TEMPLATES
 
     return TEMPLATES["qwen-instruct"]
 

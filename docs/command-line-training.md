@@ -1,107 +1,114 @@
-# BrowserAgent 命令行训练准备
+# BrowserAgent command-line training
 
-这套 CLI 负责准备模型、benchmark、Wiki ZIM 和 SFT merged 模型。RL 训练仍通过 `RL/configs/train.yaml` 与现有 bash 脚本启动。
+The public workflow is organized as data download, VTC preprocessing, SFT,
+LoRA merge, RL, and evaluation. All paths are project-relative and can be
+overridden with environment variables.
 
-## 前置条件
+## 1. Prepare the environments and public resources
 
-先按 [`env/README.md`](../env/README.md) 创建 `browseragent-v2` 与 `swift-sft` conda 环境。CLI 只检查依赖，不会安装或修改环境。
-
-Hugging Face 认证使用以下任一方式：
-
-```bash
-hf auth login
-# 或仅在当前 shell 中设置
-export HF_TOKEN=hf_your_token
-```
-
-不要把 token 写进仓库或命令参数。
-
-## 1. 准备公共资源
-
-先预览操作：
+Follow [`env/README.md`](../env/README.md) to create the `browseragent-v2` and
+`swift-sft` environments. Then download the base model, BrowserAgent SeedData, and Wiki
+resources:
 
 ```bash
-python3 scripts/prepare_training.py prepare --dry-run
+python3 env/prepare_resources.py prepare --dry-run
+python3 env/prepare_resources.py prepare
 ```
 
-开始下载和准备：
+Hugging Face authentication should be supplied by `hf auth login` or the
+`HF_TOKEN` environment variable. Never put access tokens in a tracked script.
 
-```bash
-python3 scripts/prepare_training.py prepare
-```
+## 2. Generate or download teacher SFT trajectories
 
-该命令会：
-
-- 下载 `Qwen/Qwen2.5-VL-7B-Instruct` 到 `models/`；
-- 下载 `TIGER-Lab/BrowserAgent-SeedData` 到 `benchmark/`；
-- 校验并解压仓库内置的 Kiwix 3.3.0；
-- 下载 `cogito233/WikiEnv` 的 ZIM 分片并原子合并；
-- 检查随 Git 提供的 `RL/dataset/` 数据。
-
-默认只保留一份实体 ZIM。需要四个兼容路径时：
-
-```bash
-python3 scripts/prepare_training.py prepare --wiki-copies 4
-```
-
-额外路径是相对符号链接，不会复制 ZIM 内容。
-
-## 2. 下载并合并 SFT
-
-参数只需填写数据集的唯一标识：
-
-```bash
-python3 scripts/prepare_training.py prepare-sft \
-  hotpot6500-nq6300-cr1_2-2048
-```
-
-CLI 会在 `Laramie2/browseragent-sft-lora` 中查找唯一匹配目录，选择最新时间戳目录中的最大 `checkpoint-N`，然后在前台运行 `swift export`。如有多个匹配目录，命令会列出冲突项并退出。
-
-如果上一次合并留下了不完整目录，检查路径无误后可显式重建：
-
-```bash
-python3 scripts/prepare_training.py prepare-sft \
-  hotpot6500-nq6300-cr1_2-2048 \
-  --force
-```
-
-完成后终端会打印 `SFT_MODEL_NAME_OVERRIDE`。把该值填入 `RL/configs/train.yaml`：
-
-```yaml
-common:
-  env:
-    SFT_MODEL_NAME_OVERRIDE: task-opsrc-hotpot6500-nq6300-cr1_2-2048-sft-5e-5lr-freeze_false
-```
-
-## 3. 启动 RL 训练
-
-按实验需要继续手工修改 `RL/configs/train.yaml`，然后运行：
-
-```bash
-bash RL/scripts/train.sh
-# 或批量实验
-bash RL/scripts/auto_train.sh
-```
-
-CLI 不改变现有训练参数、奖励、采样器或启动逻辑。
-
-## Wiki 服务
-
-单 ZIM 默认布局可直接启动：
+Start the Wiki and tool services, then configure an OpenAI-compatible teacher:
 
 ```bash
 ./wiki_cluster/start.sh
+./start_tool_server.sh
+export OPENAI_BASE_URL=https://your-provider.example/v1
+export OPENAI_API_KEY=your_api_key
+export OPENAI_MODEL=your_teacher_model
+python generate_sft_data.py \
+  --data-path RL/dataset/BrowserAgent-SeedData/nq/train-00000-of-00001.parquet \
+  --output-file sft/dataset/raw/generated_teacher.jsonl \
+  --workers 16
 ```
 
-使用四个链接路径时：
+Only successful trajectories are written by default and can be passed directly to `prepare_sft_dataset.py`. Alternatively, download a published teacher dataset without hard-coding its repository:
 
 ```bash
-ZIM_COPIES=4 ./wiki_cluster/start.sh
+python sft/dataset/download_sft_dataset.py --repo-id <org/dataset>
 ```
 
-检查和停止：
+## 3. Render the VTC SFT dataset
 
 ```bash
-./wiki_cluster/check.sh
-./wiki_cluster/stop.sh
+python sft/dataset/prepare_sft_dataset.py \
+  --input sft/dataset/raw/generated_teacher.jsonl \
+  --dataset-name browseragent-sft \
+  --system-msg-path prompt/system_prompt_with_history_info.txt
 ```
+
+The output is self-contained under `sft/dataset/browseragent-sft/`:
+
+```text
+sft/dataset/browseragent-sft/
+├── data.jsonl
+└── images/
+```
+
+The converter defaults to task-level, open-source multimodal records. Use
+`--level step`, `--format openai`, `--workers N`, or `--simple` when needed.
+
+## 4. Train and merge SFT
+
+Activate the Swift environment and run:
+
+```bash
+SFT_DATASET_NAME=browseragent-sft bash sft/train.sh
+bash sft/merge_lora.sh
+```
+
+The first command writes LoRA checkpoints below `sft/output/lora/`. The merge
+script selects the newest checkpoint unless `SFT_CHECKPOINT_DIR` is set.
+
+The merged model is written to `RL/models/browseragent-sft`. This is also the
+default path consumed by RL, so no manual copy or rename is required. To use a
+different shared location, set the same override for merge and RL:
+
+```bash
+export SFT_MODEL_PATH_OVERRIDE=/models/my-browseragent-sft
+bash sft/merge_lora.sh
+bash RL/scripts/train.sh
+```
+
+Other training variables, including GPU selection, batch size, learning rate,
+epochs, and output paths, can be overridden without editing the Bash scripts.
+
+## 5. Run RL
+
+Edit experiment settings in `RL/configs/train.yaml`, then run either a single
+training job or the experiment driver:
+
+```bash
+bash RL/scripts/train.sh
+bash RL/scripts/run_experiments.sh
+```
+
+The RL algorithm, rewards, samplers, and rollout behavior are otherwise
+unchanged.
+
+## 6. Evaluate
+
+Evaluation runners, experiment configs, result computation, and error-analysis
+utilities now live together under `evaluate/`:
+
+```bash
+./evaluate/run.sh all
+python evaluate/summarize_results.py \
+  evaluate/results/browseragent-sft/nq_test_results.jsonl
+python evaluate/analyze_failures.py evaluate/results/browseragent-sft
+```
+
+For evaluation matrices and resumable queues, see
+[`docs/evaluation-experiments.md`](evaluation-experiments.md).
