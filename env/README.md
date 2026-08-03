@@ -24,10 +24,11 @@ Swift 组合来自本仓库 2026-07-21 的实际训练和 LoRA 合并日志。Sw
 - NVIDIA GPU 和可用的 `nvidia-smi`；安装 `browseragent-v2` 建议驱动 570 或更新版本。当前审计机器是 A100、驱动 580.105.08。
 - 已安装 Conda。Miniconda、Anaconda 或 Miniforge 均可，但 `conda` 必须在 `PATH` 中。
 - 可以访问 conda-forge、PyPI、PyTorch wheel 仓库和 GitHub。
-- 仓库及子模块完整：
+- 完整克隆本仓库。项目使用的本地化 `verl-tool` 已直接包含在仓库中，不需要额外初始化子模块：
 
 ```bash
-git submodule update --init --recursive
+git clone https://github.com/laramie2/BrowserAgent_v2.git
+cd BrowserAgent_v2
 ```
 
 安装器会把 CUDA Toolkit、`nvcc`、CMake、Ninja 和 GCC/G++ 放进各自 Conda 环境，不要求依赖机器上 `/usr/local/cuda` 的版本。

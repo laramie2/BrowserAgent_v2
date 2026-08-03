@@ -15,6 +15,7 @@ through an OpenAI-compatible `/v1/chat/completions` API.
 | Path | Purpose |
 | --- | --- |
 | `env/` | Conda installers, dependency lists, verification, and public resource download tools |
+| `verl-tool/` | Localized, directly tracked RL framework and tool-server implementation |
 | `generate_sft_data.py` | Parallel OpenAI-compatible teacher trajectory generation |
 | `sft/` | Hugging Face teacher-data download, VTC preprocessing, SFT, and LoRA merge |
 | `RL/` | Seed extraction, K-rollout difficulty scoring, curriculum construction, and RL training |
@@ -26,10 +27,13 @@ Generated datasets, model weights, logs, and evaluation results are ignored by G
 
 ## 1. Install environments
 
-Clone submodules and install the two isolated Conda environments:
+Clone the repository and install the two isolated Conda environments. The
+localized `verl-tool` implementation is included directly in this repository;
+no submodule initialization is required.
 
 ```bash
-git submodule update --init --recursive
+git clone https://github.com/laramie2/BrowserAgent_v2.git
+cd BrowserAgent_v2
 bash env/install_all.sh
 ```
 
